@@ -183,3 +183,211 @@ async def list_tools() -> list[types.Tool]:
         )
             
     return tools
+
+
+@app.call_tool()
+async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
+    if name == "audit_chain_wide_availability":
+        audit_date = arguments.get("audit_date")
+        request_context = app.request_context
+        
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM rooms")
+        total_rooms = cursor.fetchone()[0]
+        conn.close()
+
+        rooms_processed = 0
+        batch_size = 50
+        
+        while rooms_processed < total_rooms:
+            await asyncio.sleep(0.5)
+            rooms_processed = min(rooms_processed + batch_size, total_rooms)
+            
+            if request_context.meta and request_context.meta.progressToken:
+                await request_context.session.send_progress_notification(
+                    progress_token=request_context.meta.progressToken,
+                    progress=rooms_processed,
+                    total=total_rooms
+                )
+                
+        # Return structured string listing sample rooms for the LLM to read
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT room_id, name, max_capacity FROM rooms LIMIT 4")
+        sample_rooms = cursor.fetchall()
+        conn.close()
+        
+        report = f"Audit complete. All {total_rooms} rooms checked for {audit_date}.\nAvailable options include:\n"
+        for r in sample_rooms:
+            report += f"- {r[0]} ({r[1]}): Max Capacity {r[2]}\n"
+            
+        return [types.TextContent(type="text", text=report)]
+
+    elif name == "book_event_room":
+        schema = {
+            "type": "object",
+            "properties": {
+                "event_id": {"type": "string"},
+                "room_id": {"type": "string"},
+                "requested_headcount": {"type": "integer", "minimum": 1}
+            },
+            "required": ["event_id", "room_id", "requested_headcount"],
+            "additionalProperties": False
+        }
+        try:
+            jsonschema.validate(instance=arguments, schema=schema)
+        except jsonschema.ValidationError as e:
+            return [types.TextContent(type="text", text=f"Validation Error: {e.message}")]
+
+        event_id = arguments["event_id"]
+        room_id = arguments["room_id"]
+        requested_headcount = arguments["requested_headcount"]
+
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT max_capacity, fire_code_status FROM rooms WHERE room_id = ?", (room_id,))
+        room = cursor.fetchone()
+        
+        if not room:
+            conn.close()
+            return [types.TextContent(type="text", text="Error: Room not found.")]
+            
+        max_cap, fire_status = room
+        
+        if requested_headcount > max_cap:
+            if fire_status == "STRICT_ENFORCEMENT":
+                conn.close()
+                return [types.TextContent(
+                    type="text", 
+                    text=f"CRITICAL AUTHORIZATION FAILURE: Room {room_id} has a strict fire code maximum of {max_cap}. "
+                         f"Booking {requested_headcount} guests is illegal. Request denied."
+                )]
+            else:
+                conn.close()
+                return [types.TextContent(type="text", text=f"Error: Headcount {requested_headcount} exceeds capacity {max_cap}.")]
+
+        cursor.execute("UPDATE events SET room_id = ?, headcount = ? WHERE event_id = ?", 
+                       (room_id, requested_headcount, event_id))
+        conn.commit()
+        conn.close()
+        
+        return [types.TextContent(type="text", text=f"Success: {event_id} safely booked into {room_id} with {requested_headcount} guests.")]
+
+    elif name == "authenticate_director":
+        pin = arguments.get("pin")
+        if pin == "1234":
+            global is_director_authenticated
+            is_director_authenticated = True
+            await app.request_context.session.send_tool_list_changed()
+            return [types.TextContent(type="text", text="Authentication successful. Senior Director role active. New tools are now available.")]
+        return [types.TextContent(type="text", text="Authentication failed: Invalid PIN.")]
+
+    elif name == "draft_custom_menu":
+        guest_id = arguments.get("guest_id")
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT dietary_restrictions FROM guests WHERE guest_id = ?", (guest_id,))
+        guest = cursor.fetchone()
+        
+        if not guest:
+            conn.close()
+            return [types.TextContent(type="text", text="Guest not found.")]
+            
+        restrictions = guest[0]
+        cursor.execute("SELECT name, is_nut_free, is_vegan FROM safe_ingredients")
+        ingredients = cursor.fetchall()
+        conn.close()
+        
+        ingredient_list = "\n".join([f"- {i[0]} (Nut-Free: {bool(i[1])}, Vegan: {bool(i[2])})" for i in ingredients])
+        prompt_text = (
+            f"You are drafting a menu for a VIP guest with these restrictions: {restrictions}.\n"
+            f"You may ONLY use the following safe ingredients from our database:\n{ingredient_list}\n"
+            "Format a cohesive 3-course menu using only these safe ingredients."
+        )
+        
+        sampling_response = await app.request_context.session.create_message(
+            messages=[types.SamplingMessage(
+                role="user", 
+                content=types.TextContent(type="text", text=prompt_text)
+            )],
+            max_tokens=500
+        )
+        
+        menu = sampling_response.content.text if sampling_response else "Sampling failed."
+        return [types.TextContent(type="text", text=f"Custom Menu Drafted via Sampling:\n{menu}")]
+
+    elif name == "confirm_event_booking":
+        event_id = arguments.get("event_id")
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT deposit_required FROM events WHERE event_id = ?", (event_id,))
+        event = cursor.fetchone()
+        
+        if not event:
+            conn.close()
+            return [types.TextContent(type="text", text="Event not found.")]
+            
+        deposit = event[0]
+        
+        prompt_text = (
+            f"SECURITY CHECK: Event {event_id} requires a non-refundable deposit of ${deposit}. "
+            f"Please ask the human coordinator whether to approve or reject this deposit. "
+            f"Reply with EXACTLY 'APPROVE' to confirm or 'REJECT' to cancel."
+        )
+        
+        try:
+            # Send a genuine elicitation/create request to the client
+            elicitation_response = await app.request_context.session.send_request(
+                "elicitation/create",
+                {"message": prompt_text}
+            )
+            # The client's handle_elicitation callback returns a dictionary like: {"action": "accept", "response": "APPROVE"}
+            human_response = elicitation_response.get("response", "REJECT").strip().upper()
+        except Exception as e:
+            conn.close()
+            return [types.TextContent(type="text", text=f"Action aborted due to elicitation error: {str(e)}")]
+
+        if "APPROVE" in human_response:
+            cursor.execute("UPDATE events SET status = 'CONFIRMED' WHERE event_id = ?", (event_id,))
+            conn.commit()
+            conn.close()
+            return [types.TextContent(type="text", text=f"Success: Event {event_id} confirmed via human elicitation. Deposit processed.")]
+        else:
+            conn.close()
+            return [types.TextContent(type="text", text=f"Action aborted. Human response was '{human_response}'. Deposit not processed.")]
+
+    elif name == "view_event_deposit_status":
+        event_id = arguments.get("event_id")
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT status, deposit_required FROM events WHERE event_id = ?", (event_id,))
+        event = cursor.fetchone()
+        conn.close()
+        
+        if not event:
+             return [types.TextContent(type="text", text="Event not found.")]
+             
+        status, deposit = event[0], event[1]
+        
+        if status == "CONFIRMED":
+            return [types.TextContent(type="text", text=f"Event {event_id} status is now officially CONFIRMED. The ${deposit} deposit has been successfully processed and paid.")]
+        else:
+            return [types.TextContent(type="text", text=f"Event {event_id} status is {status}. A deposit of ${deposit} is currently pending.")]
+
+    else:
+        raise ValueError(f"Unknown tool: {name}")
+
+
+async def main():
+    print("Starting Aurelia BEO Assistant Server on stdio...", file=sys.stderr, flush=True)
+    init_options = app.create_initialization_options()
+    if init_options.capabilities.experimental is None:
+        init_options.capabilities.experimental = {}
+    init_options.capabilities.experimental["elicitation"] = {}
+    
+    async with stdio_server() as (read_stream, write_stream):
+        await app.run(read_stream, write_stream, init_options)
+
+if __name__ == "__main__":
+    asyncio.run(main())

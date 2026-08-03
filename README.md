@@ -53,3 +53,21 @@ erDiagram
 ```
 
 ---
+
+## 3. Implementation of the 9 Protocol Concerns
+
+Every MCP protocol concern maps to a genuine risk or state-change requirement within Aurelia Hotels.
+
+| # | Concern | Implementation |
+|---|---------|-----------------|
+| 1 | **Capability Negotiation** | The server declares elicitation support during the `initialize` exchange. If a client connects without elicitation support, the server safely falls back to a read-only mode. |
+| 2 | **Notifications** | When a user authenticates as a Senior Director via `authenticate_director`, the server pushes a `tools/list_changed` notification at runtime, instantly exposing high-stakes write tools without requiring a client reconnect. |
+| 3 | **Elicitation** | The `confirm_event_booking` tool stops mid-call and triggers `elicitation/create`, pausing execution to ask a human for an explicit confirmation PIN before approving a $20,000 non-refundable deposit. |
+| 4 | **Resources** | The Fire Safety and Maximum Room Capacity Policy is exposed as a read-only URI (`aurelia://policies/fire-safety`) via `resources/list` and `resources/read`, letting the model inspect policy text directly rather than wasting tokens on a function call. |
+| 5 | **Prompts** | The server exposes a parameterized template (`draft_beo`) via `prompts/list` and `prompts/get`, giving coordinators a canned starting point for new events. |
+| 6 | **Transport Choice** | Development and testing use `stdio` locally. For production multi-location hotel chains, the architecture transitions to Streamable HTTP behind secure authentication. |
+| 7 | **Progress Tracking** | The `audit_chain_wide_availability` tool runs a batch lookup across 150 chain-wide rooms, sending intermediate progress updates (`send_progress_notification`) so the client is never left blocked without feedback. |
+| 8 | **Defensive Tool Design** | Write tools (such as `book_event_room`) enforce strict JSON Schema validation with `additionalProperties: false`, paired with independent server-side database checks that block illegal fire code violations. |
+| 9 | **Sampling** | The `draft_custom_menu` tool pulls raw safe-ingredient lists from the database and uses `sampling/createMessage` to loop back to the client's model, reasoning over dietary restrictions (vegan, severe nut allergies) safely. |
+
+---
