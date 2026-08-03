@@ -1,0 +1,33 @@
+erDiagram
+    GUESTS ||--o{ EVENTS : "hosts"
+    ROOMS ||--o{ EVENTS : "is booked for"
+    
+    GUESTS {
+        string guest_id PK
+        string name
+        boolean vip_status
+        string dietary_restrictions
+    }
+    
+    ROOMS {
+        string room_id PK
+        string name
+        int max_capacity
+        string fire_code_status
+    }
+    
+    EVENTS {
+        string event_id PK
+        string guest_id FK
+        string room_id FK
+        string status
+        int headcount
+        float deposit_required
+    }
+    
+    SAFE_INGREDIENTS {
+        string ingredient_id PK
+        string name
+        boolean is_nut_free
+        boolean is_vegan
+    }
