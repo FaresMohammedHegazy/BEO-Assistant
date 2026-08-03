@@ -1,0 +1,17 @@
+# Environments & Secrets
+.env
+__pycache__/
+*.pyc
+venv/
+env/
+.mcp/
+
+# IDEs
+.vscode/
+.idea/
+.DS_Store
+
+# Local Database 
+*.db
+*.sqlite
+*.sqlite3
