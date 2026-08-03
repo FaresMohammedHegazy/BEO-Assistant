@@ -1,0 +1,4 @@
+mcp
+jsonschema
+python-dotenv
+groq
