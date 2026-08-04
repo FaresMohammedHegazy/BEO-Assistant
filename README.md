@@ -71,3 +71,15 @@ Every MCP protocol concern maps to a genuine risk or state-change requirement wi
 | 9 | **Sampling** | The `draft_custom_menu` tool pulls raw safe-ingredient lists from the database and uses `sampling/createMessage` to loop back to the client's model, reasoning over dietary restrictions (vegan, severe nut allergies) safely. |
 
 ---
+
+## 4. Tools & Capabilities
+
+| Tool Name | Type | Requires Elicitation? | Rationale / Fallback Behavior |
+|---|---|---|---|
+| `audit_chain_wide_availability` | Read-Only | No | Safe batch check across hotel rooms; streams progress updates. |
+| `book_event_room` | Write | No | Guarded by strict server-side JSON schema and fire code validation. |
+| `authenticate_director` | Write (State Change) | No | Unlocks elevated roles and triggers runtime `tools/list_changed`. |
+| `draft_custom_menu` | Read / Compute | No | Uses sampling to have the client model reason over safe database ingredients. |
+| `confirm_event_booking` | High-Stakes Write | **Yes** | Gated behind human sign-off for large financial deposits. Falls back to `view_event_deposit_status` if the client lacks elicitation capabilities. |
+
+---

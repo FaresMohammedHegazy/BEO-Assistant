@@ -121,3 +121,32 @@ class BEODemoAgent:
             final_text = response_message.content
             print(f"\n[Agent]: {final_text}")
             self.messages.append({"role": "assistant", "content": final_text})
+
+    async def run_fallback_demo(self):
+        print("\n" + "="*65)
+        print("STEP 1: THE FALLBACK DEMO (Connecting without Elicitation)")
+        print("="*65)
+        
+        env = os.environ.copy()
+        env["DEMO_MODE"] = "fallback"
+        server_params = StdioServerParameters(command="python", args=[self.server_path], env=env)
+        
+        async with stdio_client(server_params) as (read_stream, write_stream):
+            # Client explicitly initialized WITHOUT capabilities
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                print("[Client System] Connected to server WITHOUT 'elicitation' capability.")
+                
+                print("[Client System] Authenticating to trigger tool load...")
+                await session.call_tool("authenticate_director", arguments={"pin": "1234"})
+                
+                tools_result = await session.list_tools()
+                tool_names = [t.name for t in tools_result.tools]
+                print(f"[Client System] Available Tools: {tool_names}")
+                
+                if "view_event_deposit_status" in tool_names and "confirm_event_booking" not in tool_names:
+                    print("[SUCCESS] Server safely fell back to read-only tool because we lack elicitation!")
+                else:
+                    print("[FAILED] Fallback logic didn't work as expected.")
+                
+        print("[Client System] Disconnected. Server state reset.\n")
