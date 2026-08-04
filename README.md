@@ -83,3 +83,95 @@ Every MCP protocol concern maps to a genuine risk or state-change requirement wi
 | `confirm_event_booking` | High-Stakes Write | **Yes** | Gated behind human sign-off for large financial deposits. Falls back to `view_event_deposit_status` if the client lacks elicitation capabilities. |
 
 ---
+
+## 5. Getting Started
+
+### Prerequisites
+
+- Python 3.10+
+- A valid Groq API Key
+
+### Step-by-Step Execution
+
+**1. Clone or open the repository**
+
+```bash
+cd aurelia-beo-assistant
+```
+
+**2. Create and activate a virtual environment**
+
+```bash
+python -m venv venv
+
+# On Windows:
+venv\Scripts\activate
+
+# On macOS/Linux:
+source venv/bin/activate
+```
+
+**3. Install dependencies**
+
+```bash
+pip install -r mcp_server/requirements.txt
+pip install groq python-dotenv
+```
+
+**4. Configure environment variables**
+
+Create a `.env` file in the root directory:
+
+```
+GROQ_API_KEY=your_actual_groq_api_key_here
+MODEL_NAME=llama-3.3-70b-versatile
+```
+
+**5. Initialize and seed the database**
+
+```bash
+python db/setup_db.py
+```
+
+**6. Run the end-to-end demo script**
+
+```bash
+python agent/client.py
+```
+
+The script automatically:
+
+- Executes the fallback demo and handles capability handshakes
+- Pulls resources and prompts
+- Triggers the fire-code defensive block
+- Streams progress tracking updates
+- Runs the sampling menu-generation loop
+- Pauses to request human confirmation (`APPROVE`) for the high-stakes deposit
+
+---
+
+## Project Structure
+
+```
+aurelia-beo-assistant/
+├── agent/
+│   └── client.py            # End-to-end demo client
+├── db/
+│   ├── aurelia.db           # SQLite database
+│   ├── schema.mermaid       # ERD source
+│   ├── ERD.png              # ERD
+│   └── setup_db.py          # Database init & seed script
+├── mcp_server/
+│   └── server.py
+├── .env
+├── .gitignore
+├── commands.txt             # Local environment config
+├── README.md
+└── requirements.txt
+```
+
+---
+
+## License
+
+Internal project — Aurelia Hotels & Resorts. All rights reserved.
