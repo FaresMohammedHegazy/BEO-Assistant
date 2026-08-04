@@ -6,6 +6,7 @@ from groq import AsyncGroq
 from mcp.client.session import ClientSession
 from mcp.client.stdio import stdio_client, StdioServerParameters
 import mcp.types as types
+from memory.short_term import ShortTermMemory, Message
 
 load_dotenv()
 MODEL = os.getenv("MODEL_NAME")
@@ -14,9 +15,14 @@ class BEODemoAgent:
     def __init__(self):
         self.groq_client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
         self.server_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'mcp_server', 'server.py')
-        self.messages = []
+        self.stm = ShortTermMemory(buffer_size=20)   
         self.tools_available = []
 
+    def _to_groq_format(self, msg: Message) -> dict:
+        base = {"role": msg.role, "content": msg.content}
+        base.update(msg.metadata)
+        return base
+    
     async def chat_with_groq(self, user_prompt, session):
         print(f"\n[User]: {user_prompt}")
         
@@ -25,7 +31,8 @@ class BEODemoAgent:
             "content": "You are a helpful BEO assistant. IF a tool returns a menu or specific text, output it EXACTLY as provided. Do not add unverified ingredients."
         }
         
-        current_messages = [system_msg] + self.messages
+        recent = self.stm.get_context()["recent_messages"]  
+        current_messages = [system_msg] + [self._to_groq_format(m) for m in recent]
         current_messages.append({"role": "user", "content": user_prompt})
         
         groq_tools = []
@@ -77,8 +84,12 @@ class BEODemoAgent:
         response_message = response.choices[0].message
         
         if response_message.tool_calls:
-            self.messages.append({"role": "user", "content": user_prompt})
-            self.messages.append(response_message)
+            self.stm.add_message(Message(role="user", content=user_prompt))
+            self.stm.add_message(Message(
+                role="assistant",
+                content=response_message.content or "",
+                metadata={"tool_calls": response_message.tool_calls}
+            ))
             
             for tool_call in response_message.tool_calls:
                 func_name = tool_call.function.name
@@ -102,25 +113,40 @@ class BEODemoAgent:
                         result_text = result.content[0].text
                     
                     print(f"   [Tool Result]: {result_text}")
-                    self.messages.append({"role": "tool", "tool_call_id": tool_call.id, "name": func_name, "content": result_text})
+                    self.stm.add_message(Message(
+                        role="tool",
+                        content=result_text,
+                        metadata={"tool_call_id": tool_call.id, "name": func_name}
+                    ))
+                    if func_name in ("book_event_room", "confirm_event_booking"):
+                        self.stm.update_scratchpad(
+                            current_goal=f"Process booking for {args.get('event_id')}",
+                            active_sub_goal=f"Executed {func_name}",
+                            working_facts={"event_id": args.get("event_id"), "last_tool": func_name}
+                        )
                 except Exception as e:
                     print(f"   [Tool Error]: {str(e)}")
-                    self.messages.append({"role": "tool", "tool_call_id": tool_call.id, "name": func_name, "content": f"Error: {str(e)}"})
-            
+                    self.stm.add_message(Message(
+                        role="tool",
+                        content=f"Error: {str(e)}",
+                        metadata={"tool_call_id": tool_call.id, "name": func_name}
+                    ))
+
+            recent = self.stm.get_context()["recent_messages"]
             final_response = await self.groq_client.chat.completions.create(
                 model=MODEL,
-                messages=[system_msg] + self.messages,
+                messages=[system_msg] + [self._to_groq_format(m) for m in recent],
                 tools=groq_tools,
                 temperature=0.2
             )
             final_text = final_response.choices[0].message.content
             print(f"\n[Agent]: {final_text}")
-            self.messages.append({"role": "assistant", "content": final_text})
+            self.stm.add_message(Message(role="assistant", content=final_text))
         else:
-            self.messages.append({"role": "user", "content": user_prompt})
+            self.stm.add_message(Message(role="user", content=user_prompt))
             final_text = response_message.content
             print(f"\n[Agent]: {final_text}")
-            self.messages.append({"role": "assistant", "content": final_text})
+            self.stm.add_message(Message(role="assistant", content=final_text))
 
     async def run_fallback_demo(self):
         print("\n" + "="*65)
@@ -132,7 +158,7 @@ class BEODemoAgent:
         server_params = StdioServerParameters(command="python", args=[self.server_path], env=env)
         
         async with stdio_client(server_params) as (read_stream, write_stream):
-            # Client explicitly initialized WITHOUT capabilities
+
             async with ClientSession(read_stream, write_stream) as session:
                 await session.initialize()
                 print("[Client System] Connected to server WITHOUT 'elicitation' capability.")
