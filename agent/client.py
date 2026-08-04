@@ -150,3 +150,101 @@ class BEODemoAgent:
                     print("[FAILED] Fallback logic didn't work as expected.")
                 
         print("[Client System] Disconnected. Server state reset.\n")
+
+    async def run_main_demo(self):
+        print("\n" + "="*65)
+        print("STEP 2-8: THE MAIN DEMO (Full Handshake & Execution)")
+        print("="*65)
+        
+        # Force the server into main demo mode
+        env = os.environ.copy()
+        env["DEMO_MODE"] = "main"
+        server_params = StdioServerParameters(command="python", args=[self.server_path], env=env)
+        
+        async with stdio_client(server_params) as (read_stream, write_stream):
+            
+            async def handle_sampling(context, params) -> types.CreateMessageResult:
+                prompt = params.messages[0].content.text
+                
+                # Intercept the security check for human elicitation
+                is_elicitation_trigger = "SECURITY CHECK" in prompt
+                if is_elicitation_trigger:
+                    print("\n   [Elicitation Alert]: Server paused execution for human approval!")
+                    print(f"   [Server Prompt]: {prompt}")
+                    human_elicitation_response = input("   [Your Input (Type 'APPROVE' to confirm or 'REJECT' to cancel)]: ").strip().upper()
+                    return types.CreateMessageResult(
+                        role="assistant",
+                        content=types.TextContent(type="text", text=human_elicitation_response),
+                        model=MODEL
+                    )
+                
+                # Standard sampling for menu generation
+                print("\n   [Sampling Alert]: Server requested the LLM to reason over raw DB facts!")
+                print(f"   [Server Prompt]:\n{prompt}")
+                
+                response = await self.groq_client.chat.completions.create(
+                    model=MODEL,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.2,
+                    max_tokens=500
+                )
+                return types.CreateMessageResult(
+                    role="assistant",
+                    content=types.TextContent(type="text", text=response.choices[0].message.content),
+                    model=MODEL
+                )
+
+            async with ClientSession(
+                read_stream, 
+                write_stream,
+                sampling_callback=handle_sampling
+            ) as session:
+                
+                # Inject client capability for elicitation
+                if hasattr(session, "_client_capabilities"):
+                    session._client_capabilities = types.ClientCapabilities(
+                        experimental={"elicitation": {}, "sampling": {}}
+                    )
+
+                init_result = await session.initialize()
+                
+                server_caps = init_result.capabilities
+                if server_caps.experimental and "elicitation" in server_caps.experimental:
+                    print("\n[Capability Negotiation]: Client verified Server supports 'elicitation'. Safe to proceed.")
+                
+                tools_result = await session.list_tools()
+                self.tools_available = tools_result.tools
+
+                demo_prompts = [
+                    "Fetch the 'draft_beo' prompt template for event_id 'EVT_999'.",
+                    "Fetch the resource at 'aurelia://policies/fire-safety' to check the rules for STRICT_ENFORCEMENT.",
+                    "Attempt to book EVT_999 into ROOM_101 with 500 guests. (This should fail due to fire code).",
+                    "Run the chain-wide availability audit for 2026-10-31 to find a different room. (Watch for progress delays)",
+                    "Draft a custom menu for GUEST_VIP_1.",
+                    
+                    # --- BEFORE CHECK ---
+                    "Before we authenticate, check the current deposit status for EVT_999.", 
+                    
+                    "Authenticate as Senior Director using PIN 1234.",
+                    "Now that we are authenticated, please explicitly fetch the tool list using get_available_tools.",
+                    "Confirm the event booking for EVT_999 to process the deposit.",
+                    
+                    # --- AFTER CHECK ---
+                    "Check the deposit status for EVT_999 one more time to verify the database changed." 
+                ]
+                
+                for prompt in demo_prompts:
+                    await self.chat_with_groq(prompt, session)
+                    await asyncio.sleep(1.0)
+                    
+                    if "Authenticate" in prompt or "authenticated" in prompt:
+                         updated_tools = await session.list_tools()
+                         self.tools_available = updated_tools.tools
+
+async def main():
+    agent = BEODemoAgent()
+    await agent.run_fallback_demo()
+    await agent.run_main_demo()
+
+if __name__ == "__main__":
+    asyncio.run(main())
