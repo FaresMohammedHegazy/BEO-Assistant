@@ -18,6 +18,7 @@ class EpisodicStore:
             "content": message.content,
             "metadata": dict(message.metadata),
             "reasoning": reasoning,
+            "consolidated": False
         }
         self.entries.append(entry)
 

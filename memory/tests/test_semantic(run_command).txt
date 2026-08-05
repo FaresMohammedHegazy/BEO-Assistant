@@ -1,0 +1,1 @@
+BEO-Assistant-main>python -m memory.tests.test_semantic
