@@ -1,6 +1,9 @@
 from dataclasses import dataclass, field
 from collections import deque
 from datetime import datetime
+from typing import Optional
+
+from memory.router import MemoryRouter
 
 @dataclass
 class Message:
@@ -17,12 +20,21 @@ class ScratchpadState:
     last_updated: datetime = field(default_factory=datetime.utcnow)
 
 class ShortTermMemory:
-    def __init__(self, buffer_size: int = 20):
-        self.buffer = deque(maxlen=buffer_size)   # rolling buffer
-        self.scratchpad = ScratchpadState()        
+    def __init__(self, buffer_size: int = 20, router: Optional[MemoryRouter] = None):
+        self.buffer = deque()
+        self.buffer_size = buffer_size
+        self.scratchpad = ScratchpadState()
+        self.router = router
 
     def add_message(self, message: Message):
-        self.buffer.append(message)  # when it's full, the last message is automatically deleted
+        self.buffer.append(message)
+        self._trim_overflowing_items()
+
+    def _trim_overflowing_items(self):
+        while len(self.buffer) > self.buffer_size:
+            item = self.buffer.popleft()
+            if self.router is not None:
+                self.router.route_aging_item(item, self.get_context())
 
     def update_scratchpad(self, **kwargs):
         for k, v in kwargs.items():
@@ -36,5 +48,4 @@ class ShortTermMemory:
         }
 
     def overflowing_items(self) -> list[Message]:
-        # 
-        ...
+        return list(self.buffer)[self.buffer_size:]
