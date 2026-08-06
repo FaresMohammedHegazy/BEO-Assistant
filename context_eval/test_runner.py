@@ -63,6 +63,12 @@ def build_test_case(fact, total_turns):
         "messages": messages
     }
 
+def run():
+    cases = [build_test_case(fact, length) for fact in CRITICAL_FACTS for length in LENGTHS]
+    with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
+        json.dump(cases, f, indent=2, ensure_ascii=False)
+    print(f"Generated {len(cases)} test cases → {OUTPUT_PATH}")
+    return cases
 
 if __name__ == "__main__":
     run()
