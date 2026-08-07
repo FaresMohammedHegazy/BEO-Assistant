@@ -1,0 +1,1 @@
+BEO-Assistant-main>python -m unittest rag.tests.test_retrievers
