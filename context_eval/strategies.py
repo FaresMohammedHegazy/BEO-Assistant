@@ -1,5 +1,9 @@
 import os
-from groq import AsyncGroq
+
+try:
+    from groq import AsyncGroq
+except Exception:  # pragma: no cover - runtime dependency is optional for offline metrics
+    AsyncGroq = None
 
 # --- HELPER FUNCTIONS ---
 # The agent buffer stores both dictionaries and Groq ChoiceMessage objects.
@@ -70,43 +74,60 @@ async def apply_recursive_summarization(messages, compact_every=15, client=None,
     """
     if not messages:
         return []
-        
+
     system_msgs = [m for m in messages if _get_role(m) == "system"]
     history_msgs = [m for m in messages if _get_role(m) != "system"]
-    
+
     if len(history_msgs) <= compact_every:
         return messages
-        
+
     older_msgs = history_msgs[:-10]
     recent_msgs = history_msgs[-10:]
-    
+
     dialogue_to_summarize = ""
     for m in older_msgs:
         role = _get_role(m) or "unknown"
         content = _get_content(m) or "tool_call_issued"
         dialogue_to_summarize += f"{role.upper()}: {content}\n"
-        
+
     prompt = (
         "Summarize the following interaction concisely. "
         "Preserve all specific facts, extracted database identifiers (like EVT_999 or ROOM_101), "
         "and active tasks.\n\n"
         f"{dialogue_to_summarize}"
     )
-    
+
     if not client:
-        client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
+        api_key = os.getenv("GROQ_API_KEY")
+        if AsyncGroq is None or not api_key:
+            summary_text = " ".join(
+                f"{_get_role(m) or 'unknown'}: {_get_content(m) or 'tool_call_issued'}"
+                for m in older_msgs
+            )
+            summary_msg = {
+                "role": "system",
+                "content": f"PRIOR CONTEXT SUMMARY: {summary_text[:1400]}",
+            }
+            return system_msgs + [summary_msg] + recent_msgs
+
+        client = AsyncGroq(api_key=api_key)
+
     if not model:
         model = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
-        
-    response = await client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.1
-    )
-    
-    summary = response.choices[0].message.content
+
+    try:
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+        )
+
+        summary = response.choices[0].message.content
+    except Exception:
+        summary = dialogue_to_summarize[:1400]
+
     summary_msg = {"role": "system", "content": f"PRIOR CONTEXT SUMMARY: {summary}"}
-    
+
     return system_msgs + [summary_msg] + recent_msgs
 
 

@@ -84,7 +84,27 @@ Every MCP protocol concern maps to a genuine risk or state-change requirement wi
 
 ---
 
-## 5. Getting Started
+## 5. Context Strategy Evaluation
+
+The repository ships a deterministic evaluator that rewinds the full BEO recall suite through the four pruning strategies and records objective evidence for the production context choice.
+
+### Commands
+
+```bash
+python context_eval/evaluate.py
+```
+
+That command loads the test corpus from the suite file, applies the four context-selection strategies, checks whether the critical operational fact survives after pruning, and writes a markdown comparison table to `context_eval/comparison_table.md`.
+
+The scorecard has the required columns:
+
+- Task accuracy after pruning
+- Tokens consumed
+- Latency
+
+This table is the artifact that justifies whatever production context strategy the team selects after the evidence is collected.
+
+## 6. Getting Started
 
 ### Prerequisites
 
