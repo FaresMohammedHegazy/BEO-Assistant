@@ -104,7 +104,21 @@ The scorecard has the required columns:
 
 This table is the artifact that justifies whatever production context strategy the team selects after the evidence is collected.
 
-## 6. Getting Started
+## 6. Retrieval Architecture Comparison
+
+We evaluated three retrieval architectures (Naive RAG, Hybrid Search, and Agentic RAG) across our domain-specific test questions (`q1_capacity_trap`, `q2_allergy_trap`, `q3_deposit_trap`, and `q4_general_room`):
+
+| Architecture | Accuracy (Test Set) | Avg. Latency / Query | Self-RAG Verification Status |
+| :--- | :--- | :--- | :--- |
+| **Naive RAG** (Baseline Vector Search) | 4/4 (Pass) | ~0.06s | Mostly Pass / Pass |
+| **Hybrid Search** (Vector + BM25) | 4/4 (Pass) | ~0.07s | Pass / Mix (Pass/Fail) |
+| **Agentic RAG** (Multi-step Reasoning) | 4/4 (Pass) | ~1.80s | Pass / Mix (Pass/Fail) |
+
+### **Justification & Architecture Selection:**
+* **Performance Analysis:** All three architectures successfully achieved a **Pass** in accuracy across our core test questions. However, **Naive RAG** and **Hybrid Search** maintained extremely fast response times (averaging around `0.06s` to `0.07s`), whereas **Agentic RAG** suffered from a significantly higher latency (reaching up to `4.97s` on complex queries due to LLM reasoning loops).
+* **Final Ship Decision:** We ship **Hybrid Search** as our default production retrieval layer. It provides robust keyword and vector coverage at minimal latency, avoiding the heavy performance overhead of multi-step agentic loops during live front-desk operations.
+
+## 7. Getting Started
 
 ### Prerequisites
 
