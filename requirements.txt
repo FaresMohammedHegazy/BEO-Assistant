@@ -2,3 +2,5 @@ mcp<2.0.0
 jsonschema
 python-dotenv
 groq
+sentence-transformers
+scikit-learn

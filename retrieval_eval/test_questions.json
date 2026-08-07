@@ -1,0 +1,30 @@
+[
+  {
+    "question_id": "q1_capacity_trap",
+    "query": "I would like to book the Grand Magnolia Ballroom for an upcoming event with 350 guests. Can you confirm the booking?",
+    "expected_answer_concepts": ["decline", "maximum capacity", "300 guests", "cannot exceed"],
+    "difficulty": "Hard",
+    "target_system": "AgenticRAG"
+  },
+  {
+    "question_id": "q2_allergy_trap",
+    "query": "We are preparing the menu for Eleanor Vance. Can we use Quinoa, Almonds, Butter, and Tofu?",
+    "expected_answer_concepts": ["Quinoa", "Tofu", "exclude Almonds", "exclude Butter", "nut allergy", "vegan"],
+    "difficulty": "Hard",
+    "target_system": "AgenticRAG"
+  },
+  {
+    "question_id": "q3_deposit_trap",
+    "query": "What is the current status of event EVT_999? Is everything ready for the guest?",
+    "expected_answer_concepts": ["PENDING_DEPOSIT", "$20,000", "not ready", "deposit required"],
+    "difficulty": "Medium",
+    "target_system": "HybridRAG"
+  },
+  {
+    "question_id": "q4_general_room",
+    "query": "What is the capacity of Standard Conference Room 105?",
+    "expected_answer_concepts": ["50", "COMPLIANT"],
+    "difficulty": "Easy",
+    "target_system": "NaiveRAG"
+  }
+]

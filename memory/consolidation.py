@@ -11,7 +11,7 @@ class SemanticConsolidator:
         self.groq_client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
         self.model = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
         
-    async def run_consolidation_pass(self):
+    async def run_consolidation_pass(self, max_age_days: int = 90):
         """
         Periodically scans the episodic store for un-consolidated entries
         and extracts established facts into the semantic store.
@@ -69,5 +69,9 @@ class SemanticConsolidator:
         # Mark as consolidated so they aren't processed again
         for entry in unconsolidated:
             entry["consolidated"] = True
-            
+
+        # Periodic expiration check: demote any active fact that hasn't been
+        # reinforced or contradicted in a while, instead of trusting it forever.
+        self.semantic_store.expire_stale_facts(max_age_days=max_age_days)
+
         print("[Consolidation] Pass complete.")

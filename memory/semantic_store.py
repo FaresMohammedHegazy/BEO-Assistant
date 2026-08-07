@@ -60,3 +60,42 @@ class SemanticStore:
     def get_fact_history(self, entity_id: str, attribute: str) -> list:
         """Retrieves the full version history of a specific fact."""
         return self.entities.get(entity_id, {}).get(attribute, [])
+
+    def expire_stale_facts(self, max_age_days: int = 90) -> list[dict]:
+        """
+        Walks every entity/attribute and demotes any 'active' fact whose
+        timestamp is older than max_age_days to 'expired'. Nothing is deleted -
+        the full version history (including the now-expired entry) stays intact,
+        exactly like the 'superseded' status used for conflicts.
+        Returns the list of facts that were just expired, for logging/demo purposes.
+        """
+        now = datetime.utcnow()
+        newly_expired = []
+
+        for entity_id, attributes in self.entities.items():
+            for attribute, history in attributes.items():
+                if not history:
+                    continue
+                latest = history[-1]
+                if latest["status"] != "active":
+                    continue  # already superseded or expired, nothing to do
+
+                ts_str = latest["timestamp"]
+                if ts_str.endswith("Z"):
+                    ts_str = ts_str[:-1]
+                fact_time = datetime.fromisoformat(ts_str)
+                age_days = (now - fact_time).total_seconds() / 86400
+
+                if age_days > max_age_days:
+                    latest["status"] = "expired"
+                    newly_expired.append({
+                        "entity_id": entity_id,
+                        "attribute": attribute,
+                        "value": latest["value"],
+                        "age_days": round(age_days, 1),
+                    })
+                    print(f"\n[SEMANTIC EXPIRATION] Entity: {entity_id}")
+                    print(f"  Attribute '{attribute}' (v{latest['version']}) is {age_days:.1f} days old "
+                          f"(> {max_age_days} day limit) -> STATUS: expired")
+
+        return newly_expired

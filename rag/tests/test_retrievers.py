@@ -15,7 +15,7 @@ class TestRetrievers(unittest.TestCase):
         self.store_path = os.path.join(self.temp_dir, "rag.sqlite")
         
         # Initialize the embedder and store
-        self.embedder = SentenceEmbeddingModel(model_name="test-model")
+        self.embedder = SentenceEmbeddingModel(model_name="sentence-transformers/all-MiniLM-L6-v2")
         self.store = VectorStore(store_path=self.store_path, embedder=self.embedder)
         self.store.initialize()
         
