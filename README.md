@@ -1,6 +1,7 @@
-# BEO Assistant
+# Aurelia Hotels & Resorts — The BEO Assistant
 
-This repository implements a safety-oriented Banquet Event Order (BEO) assistant built around an MCP server, a SQLite-backed factual domain model, and a retrieval stack that can operate in Naive RAG, Hybrid RAG, and Agentic RAG modes.
+**A safety-first Model Context Protocol (MCP) server for Banquet Event Order management.**
+This repository implements a safety-oriented Banquet Event Order (BEO) assistant built around an MCP server, a SQLite-backed factual domain model, and a retrieval stack that can operate in Naive RAG, Hybrid RAG, and Agentic RAG modes.tual domain model, and a retrieval stack that can operate in Naive RAG, Hybrid RAG, and Agentic RAG modes.
 
 The code now covers four primary areas:
 
@@ -78,7 +79,7 @@ The current MCP server register exposes the following operational surface throug
 | `view_event_deposit_status` | Read | No | Returns the current deposit status and open event bookkeeping facts. |
 | `confirm_event_booking` | High-Stakes Write | Yes | Exposed only in the main demonstration flow when the director state and elicitation-capable client context are both active. |
 
-## Current Architecture
+## 5. Current Architecture
 
 The project is not limited to the original one-shot demo surface. The current repository has the following runtime parts:
 
@@ -90,7 +91,7 @@ The project is not limited to the original one-shot demo surface. The current re
 - Memory system in [memory/short_term.py](memory/short_term.py), [memory/semantic_store.py](memory/semantic_store.py), [memory/episodic_store.py](memory/episodic_store.py), [memory/consolidation.py](memory/consolidation.py), and [memory/router.py](memory/router.py)
 - SQLite seed setup in [db/setup_db.py](db/setup_db.py)
 
-## Data and Retrieval Modules
+## 6. Data and Retrieval Modules
 
 The SQLite database ships with a small domain schema and seed records for BEO operations:
 
@@ -100,6 +101,42 @@ The SQLite database ships with a small domain schema and seed records for BEO op
 - Safe ingredients used for menu generation constraints
 
 The RAG plane includes a sentence-transformers embedding wrapper, a SQLite + BallTree vector store, a BM25 scorer, and retriever classes that expose the main retrieval strategies.
+
+
+## 7. Context Strategy Evaluation
+ 
+The repository ships a deterministic evaluator that rewinds the full BEO recall suite through the four pruning strategies and records objective evidence for the production context choice.
+ 
+### Commands
+ 
+```bash
+python context_eval/evaluate.py
+```
+ 
+That command loads the test corpus from the suite file, applies the four context-selection strategies, checks whether the critical operational fact survives after pruning, and writes a markdown comparison table to `context_eval/comparison_table.md`.
+ 
+The scorecard has the required columns:
+ 
+- Task accuracy after pruning
+- Tokens consumed
+- Latency
+This table is the artifact that justifies whatever production context strategy the team selects after the evidence is collected.
+ 
+## 8. Retrieval Architecture Comparison
+ 
+We evaluated three retrieval architectures (Naive RAG, Hybrid Search, and Agentic RAG) across our domain-specific test questions (`q1_capacity_trap`, `q2_allergy_trap`, `q3_deposit_trap`, and `q4_general_room`):
+ 
+| Architecture | Accuracy (Test Set) | Avg. Latency / Query | Self-RAG Verification Status |
+| :--- | :--- | :--- | :--- |
+| **Naive RAG** (Baseline Vector Search) | 4/4 (Pass) | ~0.06s | Mostly Pass / Pass |
+| **Hybrid Search** (Vector + BM25) | 4/4 (Pass) | ~0.07s | Pass / Mix (Pass/Fail) |
+| **Agentic RAG** (Multi-step Reasoning) | 4/4 (Pass) | ~1.80s | Pass / Mix (Pass/Fail) |
+ 
+### **Justification & Architecture Selection:**
+* **Performance Analysis:** All three architectures successfully achieved a **Pass** in accuracy across our core test questions. However, **Naive RAG** and **Hybrid Search** maintained extremely fast response times (averaging around `0.06s` to `0.07s`), whereas **Agentic RAG** suffered from a significantly higher latency (reaching up to `4.97s` on complex queries due to LLM reasoning loops).
+* **Final Ship Decision:** We ship **Hybrid Search** as our default production retrieval layer. It provides robust keyword and vector coverage at minimal latency, avoiding the heavy performance overhead of multi-step agentic loops during live front-desk operations.
+
+
 
 ## Local Setup
 
