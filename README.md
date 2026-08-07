@@ -1,20 +1,17 @@
-# Aurelia Hotels & Resorts — The BEO Assistant
+# BEO Assistant
 
-**A safety-first Model Context Protocol (MCP) server for Banquet Event Order management.**
+This repository implements a safety-oriented Banquet Event Order (BEO) assistant built around an MCP server, a SQLite-backed factual domain model, and a retrieval stack that can operate in Naive RAG, Hybrid RAG, and Agentic RAG modes.
 
----
+The code now covers four primary areas:
 
-## 1. The Core Problem & Purpose
-
-At **Aurelia Hotels & Resorts**, event coordinators spend countless hours cross-referencing room blocks, catering limits, and ballroom availability. Giving an LLM direct database access previously proved catastrophic — naive models bypassed fire codes, double-booked ballrooms, and approved unfulfillable catering contracts.
-
-To solve this safely, we built the **Banquet Event Order (BEO) Assistant**. Instead of raw database access, our architecture places a secure **MCP Server** in front of a normalized SQLite database. This server enforces strict business logic, authorization boundaries, and human-in-the-loop safeguards before any state change occurs.
-
----
+- An MCP server that exposes resources, prompts, and tools over stdio transport.
+- A SQLite schema and seed data for rooms, guests, events, and safe dietary ingredients.
+- A client-side demo/agent loop that talks to the MCP server and the Groq LLM API.
+- Retrieval, embedding, memory, and evaluation layers for RAG quality and context selection experiments.
 
 ## 2. Entity-Relationship Diagram (ERD)
 
-The SQLite database (`db/aurelia.db`) is structured to support our core safety traps and operational tools. The Mermaid ERD below is also stored in `db/schema.mermaid`.
+The SQLite database in the repository is the operational data layer for the agent's safety checks, room-capacity enforcement, guest dietary constraints, event deposit workflow, and retrieval-backed menu reasoning. The current Mermaid schema is stored in [db/schema.mermaid](db/schema.mermaid) and is materialized through [db/setup_db.py](db/setup_db.py) into the local SQLite database file at [db/aurelia.db](db/aurelia.db) when the setup script is run.
 
 ```mermaid
 erDiagram
@@ -52,160 +49,122 @@ erDiagram
     }
 ```
 
----
+## 3. Implementation of the MCP Protocol Surface
 
-## 3. Implementation of the 9 Protocol Concerns
+The current state of the project maps the MCP concepts to concrete runtime behavior in the server and client.
 
-Every MCP protocol concern maps to a genuine risk or state-change requirement within Aurelia Hotels.
-
-| # | Concern | Implementation |
-|---|---------|-----------------|
-| 1 | **Capability Negotiation** | The server declares elicitation support during the `initialize` exchange. If a client connects without elicitation support, the server safely falls back to a read-only mode. |
-| 2 | **Notifications** | When a user authenticates as a Senior Director via `authenticate_director`, the server pushes a `tools/list_changed` notification at runtime, instantly exposing high-stakes write tools without requiring a client reconnect. |
-| 3 | **Elicitation** | The `confirm_event_booking` tool stops mid-call and triggers `elicitation/create`, pausing execution to ask a human for an explicit confirmation PIN before approving a $20,000 non-refundable deposit. |
-| 4 | **Resources** | The Fire Safety and Maximum Room Capacity Policy is exposed as a read-only URI (`aurelia://policies/fire-safety`) via `resources/list` and `resources/read`, letting the model inspect policy text directly rather than wasting tokens on a function call. |
-| 5 | **Prompts** | The server exposes a parameterized template (`draft_beo`) via `prompts/list` and `prompts/get`, giving coordinators a canned starting point for new events. |
-| 6 | **Transport Choice** | Development and testing use `stdio` locally. For production multi-location hotel chains, the architecture transitions to Streamable HTTP behind secure authentication. |
-| 7 | **Progress Tracking** | The `audit_chain_wide_availability` tool runs a batch lookup across 150 chain-wide rooms, sending intermediate progress updates (`send_progress_notification`) so the client is never left blocked without feedback. |
-| 8 | **Defensive Tool Design** | Write tools (such as `book_event_room`) enforce strict JSON Schema validation with `additionalProperties: false`, paired with independent server-side database checks that block illegal fire code violations. |
-| 9 | **Sampling** | The `draft_custom_menu` tool pulls raw safe-ingredient lists from the database and uses `sampling/createMessage` to loop back to the client's model, reasoning over dietary restrictions (vegan, severe nut allergies) safely. |
-
----
+| # | Concern | Current implementation |
+|---|---------|------------------------|
+| 1 | **Capability Negotiation** | The client performs an `initialize` handshake through `ClientSession` and then queries the tool list from the server. The connection is intentionally stdio-based and designed to be read-only unless the requested LLM workflow is attached to the server. |
+| 2 | **Notifications** | The server's director-authentication path flips server-side state so a higher-privilege tool exposure can be surfaced to the calling client. The low-level notification mechanism is wired through the MCP session and progress callback path. |
+| 3 | **Elicitation** | The `confirm_event_booking` tool is conditionally exposed when the server is driven in the high-stakes demo mode and the director role is active. The client-side demo handles approval/rejection input around the high-value deposit flow. |
+| 4 | **Resources** | The server exposes a policy resource at `aurelia://policies/fire-safety` through `list_resources()` / `read_resource()`. That resource communicates the room-capacity and fire-safety policy to the model. |
+| 5 | **Prompts** | The server exposes a `draft_beo` prompt through `list_prompts()` and `get_prompt()`, returning a BEO-drafting prompt that can accept an `event_id` argument. |
+| 6 | **Transport Choice** | The project is using the stdio transport at present, via `mcp.server.stdio` and `mcp.client.stdio`. This is aligned with the local server/client demo and evaluation flow. |
+| 7 | **Progress Tracking** | `audit_chain_wide_availability` loops over the room table and emits progress notifications using the MCP request context progress token while it checks the full room inventory. |
+| 8 | **Defensive Tool Design** | The `book_event_room` tool validates JSON arguments against a strict schema and also checks the database-backed room capacities and `fire_code_status` values before any booking write is accepted. |
+| 9 | **Sampling** | The menu-generation path relies on the Groq LLM and the safe-ingredient facts from the SQLite store. That flow asks the client-side LLM to reason over the ingredient correctness rather than trusting a free-form text generation path. |
 
 ## 4. Tools & Capabilities
 
-| Tool Name | Type | Requires Elicitation? | Rationale / Fallback Behavior |
+The current MCP server register exposes the following operational surface through the `list_tools()` contract.
+
+| Tool Name | Type | Requires Elicitation? | Current Behavior |
 |---|---|---|---|
-| `audit_chain_wide_availability` | Read-Only | No | Safe batch check across hotel rooms; streams progress updates. |
-| `book_event_room` | Write | No | Guarded by strict server-side JSON schema and fire code validation. |
-| `authenticate_director` | Write (State Change) | No | Unlocks elevated roles and triggers runtime `tools/list_changed`. |
-| `draft_custom_menu` | Read / Compute | No | Uses sampling to have the client model reason over safe database ingredients. |
-| `confirm_event_booking` | High-Stakes Write | **Yes** | Gated behind human sign-off for large financial deposits. Falls back to `view_event_deposit_status` if the client lacks elicitation capabilities. |
+| `audit_chain_wide_availability` | Read / Batch Audit | No | Counts the room inventory and reports sampled room capacity facts while pushing progress notifications. |
+| `book_event_room` | Write / Safety Guard | No | Validates request shape and rejects over-capacity requests that violate the fire-code room policy. |
+| `authenticate_director` | Write / State Change | No | Changes the director-authenticated server-side state used to gate the high-risk tool surface. |
+| `draft_custom_menu` | Read / Compute | No | Pulls safe, database-backed ingredients and routes the result through the client-side reasoning loop. |
+| `view_event_deposit_status` | Read | No | Returns the current deposit status and open event bookkeeping facts. |
+| `confirm_event_booking` | High-Stakes Write | Yes | Exposed only in the main demonstration flow when the director state and elicitation-capable client context are both active. |
 
----
+## Current Architecture
 
-## 5. Context Strategy Evaluation
+The project is not limited to the original one-shot demo surface. The current repository has the following runtime parts:
 
-The repository ships a deterministic evaluator that rewinds the full BEO recall suite through the four pruning strategies and records objective evidence for the production context choice.
+- MCP server implementation in [mcp_server/server.py](mcp_server/server.py)
+- Agent/demo orchestration in [agent/client.py](agent/client.py)
+- Vector embedding and ANN-backed storage in [rag/embedder.py](rag/embedder.py) and [rag/vector_store.py](rag/vector_store.py)
+- Retrieval variants in [rag/retrievers.py](rag/retrievers.py)
+- Self-RAG verifier in [rag/self_rag.py](rag/self_rag.py)
+- Memory system in [memory/short_term.py](memory/short_term.py), [memory/semantic_store.py](memory/semantic_store.py), [memory/episodic_store.py](memory/episodic_store.py), [memory/consolidation.py](memory/consolidation.py), and [memory/router.py](memory/router.py)
+- SQLite seed setup in [db/setup_db.py](db/setup_db.py)
 
-### Commands
+## Data and Retrieval Modules
 
-```bash
-python context_eval/evaluate.py
-```
+The SQLite database ships with a small domain schema and seed records for BEO operations:
 
-That command loads the test corpus from the suite file, applies the four context-selection strategies, checks whether the critical operational fact survives after pruning, and writes a markdown comparison table to `context_eval/comparison_table.md`.
+- Rooms with capacity and fire-code safety metadata
+- Guests with VIP and dietary restrictions
+- Events with status and deposit requirements
+- Safe ingredients used for menu generation constraints
 
-The scorecard has the required columns:
+The RAG plane includes a sentence-transformers embedding wrapper, a SQLite + BallTree vector store, a BM25 scorer, and retriever classes that expose the main retrieval strategies.
 
-- Task accuracy after pruning
-- Tokens consumed
-- Latency
-
-This table is the artifact that justifies whatever production context strategy the team selects after the evidence is collected.
-
-## 6. Retrieval Architecture Comparison
-
-We evaluated three retrieval architectures (Naive RAG, Hybrid Search, and Agentic RAG) across our domain-specific test questions (`q1_capacity_trap`, `q2_allergy_trap`, `q3_deposit_trap`, and `q4_general_room`):
-
-| Architecture | Accuracy (Test Set) | Avg. Latency / Query | Self-RAG Verification Status |
-| :--- | :--- | :--- | :--- |
-| **Naive RAG** (Baseline Vector Search) | 4/4 (Pass) | ~0.06s | Mostly Pass / Pass |
-| **Hybrid Search** (Vector + BM25) | 4/4 (Pass) | ~0.07s | Pass / Mix (Pass/Fail) |
-| **Agentic RAG** (Multi-step Reasoning) | 4/4 (Pass) | ~1.80s | Pass / Mix (Pass/Fail) |
-
-### **Justification & Architecture Selection:**
-* **Performance Analysis:** All three architectures successfully achieved a **Pass** in accuracy across our core test questions. However, **Naive RAG** and **Hybrid Search** maintained extremely fast response times (averaging around `0.06s` to `0.07s`), whereas **Agentic RAG** suffered from a significantly higher latency (reaching up to `4.97s` on complex queries due to LLM reasoning loops).
-* **Final Ship Decision:** We ship **Hybrid Search** as our default production retrieval layer. It provides robust keyword and vector coverage at minimal latency, avoiding the heavy performance overhead of multi-step agentic loops during live front-desk operations.
-
-## 7. Getting Started
+## Local Setup
 
 ### Prerequisites
 
 - Python 3.10+
-- A valid Groq API Key
+- A Groq API key and an environment that can reach the Groq service
 
-### Step-by-Step Execution
-
-**1. Clone or open the repository**
+### Install
 
 ```bash
-cd aurelia-beo-assistant
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-**2. Create and activate a virtual environment**
+### Environment variables
+
+Create a root-level `.env` file with at least the following values:
 
 ```bash
-python -m venv venv
-
-# On Windows:
-venv\Scripts\activate
-
-# On macOS/Linux:
-source venv/bin/activate
-```
-
-**3. Install dependencies**
-
-```bash
-pip install -r mcp_server/requirements.txt
-pip install groq python-dotenv
-```
-
-**4. Configure environment variables**
-
-Create a `.env` file in the root directory:
-
-```
-GROQ_API_KEY=your_actual_groq_api_key_here
+GROQ_API_KEY=your_groq_api_key
 MODEL_NAME=llama-3.3-70b-versatile
+EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
 ```
 
-**5. Initialize and seed the database**
+### Initialize the database
 
 ```bash
 python db/setup_db.py
 ```
 
-**6. Run the end-to-end demo script**
+### Run the demo client
 
 ```bash
 python agent/client.py
 ```
 
-The script automatically:
+The agent client drives the MCP server over stdio and exercises the tools, prompts, policies, and tool-calling loop.
 
-- Executes the fallback demo and handles capability handshakes
-- Pulls resources and prompts
-- Triggers the fire-code defensive block
-- Streams progress tracking updates
-- Runs the sampling menu-generation loop
-- Pauses to request human confirmation (`APPROVE`) for the high-stakes deposit
+## Evaluation and Tests
 
----
+Several subprojects use deterministic evaluation and unittest-style regression coverage:
 
-## Project Structure
-
-```
-aurelia-beo-assistant/
-├── agent/
-│   └── client.py            # End-to-end demo client
-├── db/
-│   ├── aurelia.db           # SQLite database
-│   ├── schema.mermaid       # ERD source
-│   ├── ERD.png              # ERD
-│   └── setup_db.py          # Database init & seed script
-├── mcp_server/
-│   └── server.py
-├── .env
-├── .gitignore
-├── commands.txt             # Local environment config
-├── README.md
-└── requirements.txt
+```bash
+python context_eval/evaluate.py
+python -m unittest discover
 ```
 
----
+The context evaluation flow compares strategy outputs and writes artifacts to the context evaluation folder. The retrieval test suite validates the vector store and retriever implementations.
 
-## License
+## Repository Layout
 
-Internal project — Aurelia Hotels & Resorts. All rights reserved.
+```text
+agent/
+context_eval/
+db/
+mcp_server/
+memory/
+rag/
+retrieval_eval/
+README.md
+requirements.txt
+```
+
+## Notes
+
+This repository is configured as a research-and-demo codebase rather than a packaged API service. The dependencies and runtime surface are intentionally close to the current Python implementation, including the Groq integration used by the client and the retrieval components.
