@@ -8,7 +8,7 @@ from rag.vector_store import VectorStore
 
 class VectorStoreTests(unittest.TestCase):
     def setUp(self):
-        self.temp_dir = tempfile.mkdtemp(prefix="rag-test-", dir="/tmp")
+        self.temp_dir = tempfile.mkdtemp(prefix="rag-test-")
         self.store_path = os.path.join(self.temp_dir, "rag.sqlite")
 
     def tearDown(self):

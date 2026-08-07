@@ -79,12 +79,20 @@ class VectorStore:
 
         self._conn.commit()
 
-    def chunk_text(self, text: str, chunk_size: int = 300) -> List[str]:
+    def chunk_text(self, text: str, chunk_size: int = 300, overlap: int = 50) -> List[str]:
         words = text.split()
         chunks = []
-        for idx in range(0, len(words), chunk_size):
-            chunks.append(" ".join(words[idx : idx + chunk_size]))
-        return chunks if chunks else [""]
+        
+        if not words:
+            return [""]
+            
+        for idx in range(0, len(words), max(1, chunk_size - overlap)):
+            chunk = " ".join(words[idx : idx + chunk_size])
+            chunks.append(chunk)
+            if idx + chunk_size >= len(words):
+                break
+                
+        return chunks
 
     def add_texts(self, texts: Sequence[str], metadata: Optional[Sequence[Dict[str, Any]]] = None) -> None:
         if metadata is None:
@@ -108,10 +116,10 @@ class VectorStore:
             self.initialize()
 
         query_vector = np.array(self.embedder.embed_query(query), dtype=float)
-        rows = self._conn.execute("SELECT id, text, metadata_json FROM documents").fetchall()
-
+        
+        filtered_ids = None
         if filters:
-            filtered_ids: List[str] = []
+            filtered_ids = []
             for key, value in filters.items():
                 matching_ids = [
                     row["document_id"]
@@ -128,26 +136,43 @@ class VectorStore:
                 else:
                     filtered_ids = [doc_id for doc_id in filtered_ids if doc_id in matching_ids]
 
-            if filtered_ids:
-                placeholders = ", ".join("?" for _ in filtered_ids)
-                rows = self._conn.execute(
-                    f"SELECT id, text, metadata_json FROM documents WHERE id IN ({placeholders})",
-                    filtered_ids,
-                ).fetchall()
-            else:
-                rows = []
+        if filters is not None and not filtered_ids:
+            rows = []
+        elif filtered_ids:
+            placeholders = ", ".join("?" for _ in filtered_ids)
+            query_sql = f"""
+                SELECT d.id, d.text, d.metadata_json, e.vector_json 
+                FROM documents d
+                JOIN embeddings e ON d.id = e.document_id
+                WHERE d.id IN ({placeholders})
+            """
+            rows = self._conn.execute(query_sql, filtered_ids).fetchall()
+        else:
+            query_sql = """
+                SELECT d.id, d.text, d.metadata_json, e.vector_json 
+                FROM documents d
+                JOIN embeddings e ON d.id = e.document_id
+            """
+            rows = self._conn.execute(query_sql).fetchall()
 
         scored: List[Tuple[float, Dict[str, Any]]] = []
         for row in rows:
-            vector_json = self._conn.execute(
-                "SELECT vector_json FROM embeddings WHERE document_id = ?",
-                (row["id"],),
-            ).fetchone()
-            if vector_json is None:
+            if row["vector_json"] is None:
                 continue
-            doc_vector = np.array(json.loads(vector_json[0]), dtype=float)
+            
+            doc_vector = np.array(json.loads(row["vector_json"]), dtype=float)
+            
             similarity = float(np.dot(query_vector, doc_vector) / (np.linalg.norm(query_vector) * np.linalg.norm(doc_vector) + 1e-9))
-            scored.append((similarity, {"id": row["id"], "text": row["text"], "metadata": json.loads(row["metadata_json"]), "score": similarity}))
+            
+            scored.append((
+                similarity, 
+                {
+                    "id": row["id"], 
+                    "text": row["text"], 
+                    "metadata": json.loads(row["metadata_json"]), 
+                    "score": similarity
+                }
+            ))
 
         scored.sort(key=lambda item: item[0], reverse=True)
         return [item[1] for item in scored[:top_k]]
