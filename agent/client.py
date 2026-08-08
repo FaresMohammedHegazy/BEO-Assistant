@@ -7,22 +7,98 @@ from mcp.client.session import ClientSession
 from mcp.client.stdio import stdio_client, StdioServerParameters
 import mcp.types as types
 from memory.short_term import ShortTermMemory, Message
+from memory.episodic_store import EpisodicStore
+from memory.semantic_store import SemanticStore
+from memory.router import MemoryRouter
+from memory.consolidation import SemanticConsolidator
 
+from rag.vector_store import VectorStore
+from rag.retrievers import HybridRAG
+from rag.self_rag import SelfRAG
 load_dotenv()
 MODEL = os.getenv("MODEL_NAME")
+REPO_ROOT = os.path.dirname(os.path.dirname(__file__))
 
 class BEODemoAgent:
     def __init__(self):
         self.groq_client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
-        self.server_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'mcp_server', 'server.py')
-        self.stm = ShortTermMemory(buffer_size=20)   
+        self.server_path = os.path.join(REPO_ROOT, 'mcp_server', 'server.py')
+
+        # --- Long-term memory stack ---
+        self.episodic_store = EpisodicStore()
+        self.semantic_store = SemanticStore()
+        self.memory_router = MemoryRouter(episodic_store=self.episodic_store)
+        self.consolidator = SemanticConsolidator(self.semantic_store, self.episodic_store)
+
+        self.stm = ShortTermMemory(buffer_size=8, router=self.memory_router)
+        self._turns_since_consolidation = 0
+        self._consolidate_every_n_turns = 3
+
+        # --- RAG stack ---
+        rag_db_path = os.path.join(REPO_ROOT, 'db', 'rag_store.sqlite')
+        self.vector_store = VectorStore(store_path=rag_db_path)
+        self.vector_store.initialize()
+        self.hybrid_rag = HybridRAG(self.vector_store)
+        self.self_rag = SelfRAG()
+
+        self._critical_keywords = ("allergy", "allergic", "fire code", "deposit", "nut")
+   
         self.tools_available = []
 
     def _to_groq_format(self, msg: Message) -> dict:
         base = {"role": msg.role, "content": msg.content}
         base.update(msg.metadata)
         return base
-    
+
+    def _metadata_for_user_message(self, content: str) -> dict:
+        lowered = (content or "").lower()
+        if any(keyword in lowered for keyword in self._critical_keywords):
+            return {"important": True}
+        return {}
+
+    async def _maybe_run_consolidation(self):
+        self._turns_since_consolidation += 1
+        if self._turns_since_consolidation < self._consolidate_every_n_turns:
+            return
+        self._turns_since_consolidation = 0
+        print("\n   [Memory] Running periodic consolidation pass over episodic memory...")
+        await self.consolidator.run_consolidation_pass()
+    async def _run_rag_search(self, query: str) -> str:
+        docs = self.hybrid_rag.retrieve(query, top_k=3)
+        is_relevant, rel_reason = self.self_rag.evaluate_retrieval(query, docs)
+        if not is_relevant:
+            return "No sufficiently relevant policy information was found for that question."
+
+        context = "\n".join(f"- {d['text']}" for d in docs)
+        draft_prompt = f"Context:\n{context}\n\nQuestion: {query}\nAnswer using ONLY the context above."
+        draft_response = await self.groq_client.chat.completions.create(
+             model=MODEL, messages=[{"role": "user", "content": draft_prompt}], temperature=0.0,
+        )
+        draft_answer = draft_response.choices[0].message.content
+
+        is_supported, sup_reason = self.self_rag.evaluate_support(query, draft_answer, docs)
+        if not is_supported:
+            return ("I found related policy text, but couldn't verify the drafted answer was fully "
+                "supported by it. Retrieved context: " + context)
+        return draft_answer
+
+    async def _run_memory_recall(self, guest_id: str) -> str:
+        facts = self.semantic_store.get_active_facts(guest_id)
+        if not facts:
+            return f"No durable facts on file yet for {guest_id}."
+
+        pseudo_docs = [{"text": f"{attr}: {val}"} for attr, val in facts.items()]
+        is_relevant, _ = self.self_rag.evaluate_retrieval(guest_id, pseudo_docs)
+        if not is_relevant:
+            return f"Recalled facts for {guest_id} did not pass relevance verification; withholding them."
+
+        summary = ", ".join(f"{attr}={val}" for attr, val in facts.items())
+        is_supported, _ = self.self_rag.evaluate_support(f"What do we know about {guest_id}?", summary, pseudo_docs)
+        if not is_supported:
+            return f"Recalled facts for {guest_id} failed the support check; withholding them."
+
+        return f"Semantic memory on {guest_id}: {summary}"
+
     async def chat_with_groq(self, user_prompt, session):
         print(f"\n[User]: {user_prompt}")
         
@@ -66,13 +142,38 @@ class BEODemoAgent:
             }
         })
         groq_tools.append({
+             "type": "function",
+             "function": {
+                 "name": "get_available_tools",
+                 "description": "Get a list of all currently available tools.",
+                 "parameters": {"type": "object", "properties": {}, "required": []}
+             }
+         })
+        groq_tools.append({
             "type": "function",
             "function": {
-                "name": "get_available_tools",
-                "description": "Get a list of all currently available tools.",
-                "parameters": {"type": "object", "properties": {}, "required": []}
+                "name": "search_policy_knowledge",
+                "description": "Search Aurelia's internal policy knowledge base using hybrid retrieval.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string", "description": "The policy question."}},
+                    "required": ["query"], "additionalProperties": False
+                }
             }
         })
+        groq_tools.append({
+            "type": "function",
+            "function": {
+                "name": "recall_guest_memory",
+                "description": "Recall durable facts about a guest from long-term semantic memory.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"guest_id": {"type": "string", "description": "e.g. GUEST_VIP_1"}},
+                    "required": ["guest_id"], "additionalProperties": False
+                }
+            }
+        })
+ 
 
         response = await self.groq_client.chat.completions.create(
             model=MODEL,
@@ -84,7 +185,10 @@ class BEODemoAgent:
         response_message = response.choices[0].message
         
         if response_message.tool_calls:
-            self.stm.add_message(Message(role="user", content=user_prompt))
+            self.stm.add_message(Message(
+                role="user", content=user_prompt,
+                metadata=self._metadata_for_user_message(user_prompt)
+            ))
             self.stm.add_message(Message(
                 role="assistant",
                 content=response_message.content or "",
@@ -108,6 +212,10 @@ class BEODemoAgent:
                         result_text = result if isinstance(result, str) else result.contents[0].text
                     elif func_name == "get_available_tools":
                         result_text = "Current Tools:\n" + "\n".join([f"- {t.name}: {t.description}" for t in self.tools_available])
+                    elif func_name == "search_policy_knowledge":
+                        result_text = await self._run_rag_search(args.get("query", ""))
+                    elif func_name == "recall_guest_memory":
+                        result_text = await self._run_memory_recall(args.get("guest_id", ""))
                     else:
                         result = await session.call_tool(func_name, arguments=args)
                         result_text = result.content[0].text
@@ -143,10 +251,15 @@ class BEODemoAgent:
             print(f"\n[Agent]: {final_text}")
             self.stm.add_message(Message(role="assistant", content=final_text))
         else:
-            self.stm.add_message(Message(role="user", content=user_prompt))
+            self.stm.add_message(Message(
+                role="user", content=user_prompt,
+                metadata=self._metadata_for_user_message(user_prompt)
+            ))
             final_text = response_message.content
             print(f"\n[Agent]: {final_text}")
             self.stm.add_message(Message(role="assistant", content=final_text))
+
+        await self._maybe_run_consolidation()
 
     async def run_fallback_demo(self):
         print("\n" + "="*65)
@@ -244,10 +357,14 @@ class BEODemoAgent:
                 demo_prompts = [
                     "Fetch the 'draft_beo' prompt template for event_id 'EVT_999'.",
                     "Fetch the resource at 'aurelia://policies/fire-safety' to check the rules for STRICT_ENFORCEMENT.",
+                    "Use recall_guest_memory to check what we have on file for GUEST_VIP_1.",
+                    "Just a note for the file: GUEST_VIP_1 (Eleanor Vance) has a severe nut allergy and is vegan. Please always flag this for her events.",
                     "Attempt to book EVT_999 into ROOM_101 with 500 guests. (This should fail due to fire code).",
                     "Run the chain-wide availability audit for 2026-10-31 to find a different room. (Watch for progress delays)",
                     "Draft a custom menu for GUEST_VIP_1.",
-                    
+                    "Use search_policy_knowledge to find out the fire code capacity policy for the Grand Magnolia Ballroom.",                  
+                    "Use search_policy_knowledge to check whether Aurelia is planning to open a new location in Tokyo next year.",
+
                     # --- BEFORE CHECK ---
                     "Before we authenticate, check the current deposit status for EVT_999.", 
                     
@@ -256,7 +373,9 @@ class BEODemoAgent:
                     "Confirm the event booking for EVT_999 to process the deposit.",
                     
                     # --- AFTER CHECK ---
-                    "Check the deposit status for EVT_999 one more time to verify the database changed." 
+                    "Check the deposit status for EVT_999 one more time to verify the database changed.",
+                    "Use recall_guest_memory to check what we have on file for GUEST_VIP_1 now."
+               
                 ]
                 
                 for prompt in demo_prompts:
@@ -266,6 +385,20 @@ class BEODemoAgent:
                     if "Authenticate" in prompt or "authenticated" in prompt:
                          updated_tools = await session.list_tools()
                          self.tools_available = updated_tools.tools
+
+                # Final consolidation pass
+                print("\n   [Memory] Running final consolidation pass...")
+                await self.consolidator.run_consolidation_pass()
+
+                print("\n" + "="*65)
+                print("MEMORY SUBSYSTEM SUMMARY")
+                print("="*65)
+                print(f"Short-term buffer size now: {len(self.stm.buffer)}")
+                print(f"Episodic entries recorded: {len(self.episodic_store.get_entries())}")
+                print("Router decision log:")
+                for entry in self.memory_router.get_decision_log():
+                    print(f"  [{entry['decision'].upper()}] \"{entry['item_preview']}\" - {entry['reason']}")
+                print(f"Semantic facts for GUEST_VIP_1: {self.semantic_store.get_active_facts('GUEST_VIP_1')}")
 
 async def main():
     agent = BEODemoAgent()

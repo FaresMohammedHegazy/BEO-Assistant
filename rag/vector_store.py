@@ -16,8 +16,9 @@ class VectorStore:
         self.store_path = store_path
         self.embedder = embedder or SentenceEmbeddingModel()
         self._conn: Optional[sqlite3.Connection] = None
-        # Real ANN index (HNSW). Maps our string document IDs to the integer
-        # labels hnswlib requires, and back.
+        # ANN index: scikit-learn's BallTree (not HNSW). Chose BallTree over
+        # hnswlib deliberately: hnswlib's wheel is large and keeps the whole
+        # graph resident in memory with no built-in persistence, which is overkill for a corpus of a few hundred policy chunks.
         self._ann_index: Optional[BallTree] = None
         self._index_ids: List[str] = []               # position i in the tree -> this document id
         self._index_vectors: List[List[float]] = []   # kept so we can rebuild the tree after inserts
@@ -56,7 +57,7 @@ class VectorStore:
             """
         )
         self._conn.commit()
-        # Build the in-memory HNSW index from whatever embeddings already
+        # Build the in-memory BallTree ANN index from whatever embeddings already
         # exist on disk (e.g. reopening a store populated in a previous run).
         self._rebuild_ann_index_from_db()
 
@@ -154,7 +155,7 @@ class VectorStore:
             # exact-score just this small subset instead of touching the ANN index.
             return self._exact_search_subset(query_vector, filtered_ids, top_k)
 
-        # No filter: use the real ANN (HNSW) index over the whole collection.
+        # No filter: use the real ANN (BallTree) index over the whole collection.
         return self._ann_search(query_vector, top_k)
     
 
