@@ -1,6 +1,7 @@
 import os
 import json
 import asyncio
+import sys
 from dotenv import load_dotenv
 from groq import AsyncGroq
 from mcp.client.session import ClientSession
@@ -16,12 +17,22 @@ from rag.vector_store import VectorStore
 from rag.retrievers import HybridRAG
 from rag.self_rag import SelfRAG
 load_dotenv()
-MODEL = os.getenv("MODEL_NAME")
+MODEL = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
 REPO_ROOT = os.path.dirname(os.path.dirname(__file__))
 
 class BEODemoAgent:
     def __init__(self):
-        self.groq_client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
+        api_key = (os.getenv("GROQ_API_KEY") or "").strip()
+        if not api_key:
+            raise RuntimeError(
+                "GROQ_API_KEY is not set. export GROQ_API_KEY=<your Groq key> before running agent/client.py."
+            )
+        if "\n" in api_key or "\r" in api_key or api_key.startswith("export ") or api_key.startswith("cd "):
+            raise RuntimeError(
+                "GROQ_API_KEY looks malformed. It appears to contain shell text instead of a real Groq API key. "
+                "Unset the bad environment variable and export GROQ_API_KEY=<your Groq key> only."
+            )
+        self.groq_client = AsyncGroq(api_key=api_key)
         self.server_path = os.path.join(REPO_ROOT, 'mcp_server', 'server.py')
 
         # --- Long-term memory stack ---
@@ -46,9 +57,27 @@ class BEODemoAgent:
         self.tools_available = []
 
     def _to_groq_format(self, msg: Message) -> dict:
-        base = {"role": msg.role, "content": msg.content}
-        base.update(msg.metadata)
-        return base
+        # The Groq chat API accepts a narrowed OpenAI-ish schema:
+        #   - role/content for normal messages
+        #   - tool_call_id for tool-role result messages
+        #   - tool_calls for assistant messages that launched tool calls
+        # Memory-only metadata such as {important, persist, event_id, task_id,
+        # name, source, etc.} is kept off the outbound wire contract.
+        payload = {
+            "role": msg.role,
+            "content": msg.content or "",
+        }
+
+        if msg.role == "tool":
+            tool_call_id = msg.metadata.get("tool_call_id") if msg.metadata else None
+            if tool_call_id:
+                payload["tool_call_id"] = tool_call_id
+        elif msg.role == "assistant" and msg.metadata:
+            tool_calls = msg.metadata.get("tool_calls")
+            if tool_calls:
+                payload["tool_calls"] = tool_calls
+
+        return payload
 
     def _metadata_for_user_message(self, content: str) -> dict:
         lowered = (content or "").lower()
@@ -98,6 +127,22 @@ class BEODemoAgent:
             return f"Recalled facts for {guest_id} failed the support check; withholding them."
 
         return f"Semantic memory on {guest_id}: {summary}"
+
+    def _recover_empty_final_text(self, user_prompt: str, tool_results: list[str]) -> str:
+        """Return a user-visible explanation when the Groq final completion
+        comes back empty or a tool-only turn is unanswerable from evidence.
+        """
+        evidence = [r for r in tool_results if r and str(r).strip()]
+        if evidence:
+            snippet = "\n".join(evidence[:3])
+            return (
+                f"I could not synthesize a grounded answer from the current evidence. "
+                f"The available search results were:\n{snippet}"
+            )
+        return (
+            "I could not synthesize a grounded answer from the current evidence. "
+            "The retrieval phase returned no supporting policy content."
+        )
 
     async def chat_with_groq(self, user_prompt, session):
         print(f"\n[User]: {user_prompt}")
@@ -247,15 +292,22 @@ class BEODemoAgent:
                 tools=groq_tools,
                 temperature=0.2
             )
-            final_text = final_response.choices[0].message.content
-            print(f"\n[Agent]: {final_text}")
+            final_text = (final_response.choices[0].message.content or "").strip()
+            if not final_text:
+                tool_results = [m.content for m in recent if getattr(m, "role", None) == "tool" and m.content]
+                final_text = self._recover_empty_final_text(user_prompt, tool_results)
+                print(f"\n[Agent]: {final_text}")
+            else:
+                print(f"\n[Agent]: {final_text}")
             self.stm.add_message(Message(role="assistant", content=final_text))
         else:
             self.stm.add_message(Message(
                 role="user", content=user_prompt,
                 metadata=self._metadata_for_user_message(user_prompt)
             ))
-            final_text = response_message.content
+            final_text = (response_message.content or "").strip()
+            if not final_text:
+                final_text = self._recover_empty_final_text(user_prompt, [])
             print(f"\n[Agent]: {final_text}")
             self.stm.add_message(Message(role="assistant", content=final_text))
 
@@ -268,7 +320,11 @@ class BEODemoAgent:
         
         env = os.environ.copy()
         env["DEMO_MODE"] = "fallback"
-        server_params = StdioServerParameters(command="python", args=[self.server_path], env=env)
+        server_params = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "mcp_server.server"],
+            env=env,
+        )
         
         async with stdio_client(server_params) as (read_stream, write_stream):
 
@@ -298,7 +354,11 @@ class BEODemoAgent:
         # Force the server into main demo mode
         env = os.environ.copy()
         env["DEMO_MODE"] = "main"
-        server_params = StdioServerParameters(command="python", args=[self.server_path], env=env)
+        server_params = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "mcp_server.server"],
+            env=env,
+        )
         
         async with stdio_client(server_params) as (read_stream, write_stream):
             

@@ -7,6 +7,10 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 import asyncio
 
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+
 # Define the database path dynamically
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'db', 'aurelia.db')
 
@@ -162,7 +166,7 @@ async def list_tools() -> list[types.Tool]:
                 "required": ["event_id"],
                 "additionalProperties": False
             }
-        )
+        ),
     ]
     
     # NOTIFICATIONS: Expose confirm_event_booking ONLY if authenticated and has elicitation
