@@ -1,0 +1,34 @@
+[
+  {
+    "id": "scenario_1_static",
+    "category": "Static Decomposition",
+    "name": "Linear Capacity Check",
+    "goal": "We are hosting a standard staff training across three days in rooms ROOM_102, ROOM_103, and ROOM_104. Verify the capacities of these three rooms and draft a generic welcome agenda.",
+    "db_dependency": "ROOM_102, ROOM_103, ROOM_104",
+    "expected_behavior": "Executes perfectly using parallel, static DAG batches since there are no hidden traps or missing data."
+  },
+  {
+    "id": "scenario_2_dynamic",
+    "category": "Dynamic Decomposition",
+    "name": "Missing Event Pivot",
+    "goal": "Check the deposit status for event EVT_CONF_01. If the database reports the event is not found, dynamically pivot to check the deposit status and room assignment for EVT_999 instead.",
+    "db_dependency": "EVT_CONF_01 (Missing), EVT_999 (Valid)",
+    "expected_behavior": "Static plans will fail when EVT_CONF_01 returns 'not found'. Dynamic planning will catch the error, re-plan, and successfully fetch EVT_999."
+  },
+  {
+    "id": "scenario_3_search",
+    "category": "Lookahead Search (ToT/LATS)",
+    "name": "Valid Breakout Room Combination",
+    "goal": "We need 4 parallel breakout tracks for the summit (40 people each). Select a combination of 4 distinct rooms. Standard Conference Rooms usually start at ROOM_102. Output the exact ROOM_ IDs you propose.",
+    "db_dependency": "ROOM_102 through ROOM_150",
+    "expected_behavior": "Requires combinatorial search (ToT/LATS) backed by DB evaluation to ensure all 4 rooms exist, are unique, and meet the 40-person capacity requirement."
+  },
+  {
+    "id": "scenario_4_reflexion",
+    "category": "Cross-Trial Memory (Reflexion)",
+    "name": "Fire Code Constraint Violation",
+    "goal": "Draft a booking summary for EVT_999 into ROOM_101. We have a requested_headcount of 350 attendees. Output the room ID, event ID, and requested_headcount. Do NOT ask clarifying questions.",
+    "db_dependency": "ROOM_101 (Max Capacity: 300, STRICT_ENFORCEMENT)",
+    "expected_behavior": "The agent will fail on the first try due to the strict 300-person fire code. It must use cross-trial memory to reflect, adjust the headcount downward, and succeed on the next trial."
+  }
+]
