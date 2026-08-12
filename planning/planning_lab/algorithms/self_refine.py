@@ -61,3 +61,29 @@ List concrete issues. If there are none, respond exactly PASS."""),
             raise RuntimeError("The chat model returned an empty or unsupported response")
         revised = revised.strip()
     return ReflectionResult(draft, critique, revised, grounded)
+
+def draft_and_refine_beo_summary(
+    goal: str,
+    context: str,
+    llm: BaseChatModel,
+) -> ReflectionResult:
+    """One-shot draft + a Self-Refine pass for the cheap-to-redo BEO
+    summary / menu description node. Generates the initial draft here
+    (Aurelia-specific), then hands off to reflect_and_refine() exactly
+    as the toolkit built it -- no changes to the critique/revise loop.
+    """
+    draft_response = llm.invoke([
+        ("system", "You draft a concise Banquet Event Order (BEO) "
+                    "summary for Aurelia Hotels staff."),
+        ("human", f"""Goal: {goal}
+
+Context gathered from prior steps in the plan:
+{context}
+
+Write the BEO summary now."""),
+    ], temperature=0.3)
+    if not isinstance(draft_response.content, str) or not draft_response.content.strip():
+        raise RuntimeError("The chat model returned an empty or unsupported response")
+    draft = draft_response.content.strip()
+
+    return reflect_and_refine(goal, draft, llm)
