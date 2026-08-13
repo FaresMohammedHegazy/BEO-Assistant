@@ -59,6 +59,63 @@ def test_cycle_is_rejected():
         })
 
 
+def test_conference_dag_cycle_is_blocked_before_execution():
+    valid_conference_dag = {
+        "goal": "Plan the annual leadership summit",
+        "tasks": [
+            {
+                "id": "check_hall",
+                "instruction": "Check the main hall availability for the 2026 summit date",
+                "depends_on": [],
+            },
+            {
+                "id": "check_deposit",
+                "instruction": "Check the deposit status for event EVT_CONF_01",
+                "depends_on": ["check_hall"],
+            },
+            {
+                "id": "draft_budget",
+                "instruction": "Draft a budget that keeps the deposit under budget",
+                "depends_on": ["check_hall", "check_deposit"],
+            },
+            {
+                "id": "finalize_conference_plan",
+                "instruction": "Finalize the summit plan and confirm the booking path",
+                "depends_on": ["draft_budget"],
+            },
+        ],
+    }
+
+    corrupted = {
+        "goal": valid_conference_dag["goal"],
+        "tasks": [
+            {
+                "id": "check_hall",
+                "instruction": valid_conference_dag["tasks"][0]["instruction"],
+                "depends_on": ["finalize_conference_plan"],
+            },
+            {
+                "id": "check_deposit",
+                "instruction": valid_conference_dag["tasks"][1]["instruction"],
+                "depends_on": ["check_hall"],
+            },
+            {
+                "id": "draft_budget",
+                "instruction": valid_conference_dag["tasks"][2]["instruction"],
+                "depends_on": ["check_hall", "check_deposit"],
+            },
+            {
+                "id": "finalize_conference_plan",
+                "instruction": valid_conference_dag["tasks"][3]["instruction"],
+                "depends_on": ["draft_budget"],
+            },
+        ],
+    }
+
+    with pytest.raises(ValueError, match="Cycle detected"):
+        Plan.model_validate(corrupted)
+
+
 def test_executor_passes_dependency_outputs():
     plan = Plan.model_validate({
         "goal": "Create a concise combined report",
