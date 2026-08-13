@@ -124,20 +124,10 @@ contain the fully written solution, not a placeholder or description of a soluti
             feedback = environment.evaluate(child.state)
             child.feedback = feedback
             child.environment_score = feedback.score
-            value_judgment = llm.with_structured_output(
-                ValueEstimate,
-                method="json_schema",
-            ).invoke([
-                ("system", "You are the LATS value function."),
-                ("human", f"""Task: {task}
-Candidate state:
-{child.state}
-External score: {feedback.score}
-External feedback: {feedback.details}
-Estimate the candidate's future usefulness."""),
-            ], temperature=0.1)
-            child.model_score = value_judgment.score
-            combined_value = 0.75 * child.environment_score + 0.25 * child.model_score
+            # LATS for high-risk decisions should be driven by grounded environment feedback.
+            # The model's subjective score is intentionally not used as a value signal here.
+            child.model_score = feedback.score
+            objective_value = child.environment_score
             if not feedback.success:
                 response = llm.invoke([
                     ("system", "Create a branch-level LATS reflection grounded in environment feedback."),
@@ -152,7 +142,7 @@ Explain briefly why this branch failed and how a later expansion should change."
                     raise RuntimeError("The chat model returned an empty or unsupported response")
                 reflection = reflection.strip()
                 child.reflections.append(reflection)
-            _backpropagate(child, combined_value)
+            _backpropagate(child, objective_value)
             if best is root or child.environment_score > best.environment_score:
                 best = child
             if feedback.success:
