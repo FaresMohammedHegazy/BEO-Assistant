@@ -1,5 +1,5 @@
-langchain-groq>=0.2,<1
-networkx>=3.4,<3.5
-python-dotenv>=1.0,<2
-pydantic>=2.7,<3
-pytest>=8,<9
+# All dependencies for planning/ have been merged into the root
+# requirements.txt so `pip install -r requirements.txt` from the repo
+# root installs everything needed to run mcp_server/, agent/, and
+# planning/ together. This file is kept (empty) so a stray
+# `pip install -r planning/requirements.txt` doesn't error out.

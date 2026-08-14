@@ -68,6 +68,13 @@ class PlanningAgentExecutor:
         self._session = None
         self._exit_stack = None
 
+    @property
+    def session(self) -> ClientSession | None:
+        """Read-only access to the live MCP session, for callers (like
+        the evaluation harness) that need to pass it directly into
+        algorithm functions instead of going through run_*()."""
+        return self._session
+    
     async def __aenter__(self) -> "PlanningAgentExecutor":
         await self.connect()
         return self
