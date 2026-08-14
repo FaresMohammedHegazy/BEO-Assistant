@@ -1,21 +1,6 @@
 import asyncio
-import os
-import sys
 
-from dotenv import load_dotenv
-load_dotenv() 
-
-from langchain_groq import ChatGroq
-from mcp.client.session import ClientSession
-from mcp.client.stdio import stdio_client, StdioServerParameters
-
-from planning.planning_lab.algorithms.decomposition import (
-    decompose_goal_grounded,
-    execute_plan_against_mcp,
-)
-from planning.planning_lab.algorithms.decomposition import final_output  # reused unchanged
-
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+from agent.planning_agent_executor import PlanningAgentExecutor
 
 CONFERENCE_REQUEST = (
     "We're planning our annual leadership summit: 3 days, ~150 attendees "
@@ -27,29 +12,14 @@ CONFERENCE_REQUEST = (
 
 
 async def run_decomposition_first_demo():
-    llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.1)
-
-    server_params = StdioServerParameters(
-        command=sys.executable,
-        args=["-m", "mcp_server.server"],
-        env=os.environ.copy(),
-    )
-
-    async with stdio_client(server_params) as (read_stream, write_stream):
-        async with ClientSession(read_stream, write_stream) as session:
-            await session.initialize()  # same handshake pattern as agent/client.py
-
-            plan, tool_bindings = decompose_goal_grounded(CONFERENCE_REQUEST, llm)
-            print(f"[Plan] {len(plan.tasks)} tasks, "
-                  f"{len(tool_bindings)} bound to real MCP tools")
-            for task in plan.tasks:
-                binding = tool_bindings.get(task.id)
-                tag = f"-> {binding.tool_name}" if binding else "(reasoning)"
-                print(f"  {task.id}: {task.instruction}  {tag}")
-
-            outputs = await execute_plan_against_mcp(plan, tool_bindings, llm, session)
-            print("\n[Final synthesis]:")
-            print(final_output(plan, outputs))
+    async with PlanningAgentExecutor() as executor:
+        result = await executor.run_decomposition_first(CONFERENCE_REQUEST)
+        print(f"[Plan] {len(result.steps)} tasks")
+        for step in result.steps:
+            tag = f"-> {step.tool_name}" if step.tool_name else "(reasoning)"
+            print(f"  {step.task_id}: {step.instruction}  {tag}")
+        print("\n[Final synthesis]:")
+        print(result.final_answer)
 
 
 if __name__ == "__main__":
