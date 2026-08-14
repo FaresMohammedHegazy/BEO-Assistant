@@ -111,7 +111,6 @@ The repository ships a deterministic evaluator that rewinds the full BEO recall 
  
 ```bash
 python context_eval/evaluate.py
-python planning_eval/evaluate_planning.py
 ```
  
 That command loads the test corpus from the suite file, applies the four context-selection strategies, checks whether the critical operational fact survives after pruning, and writes a markdown comparison table to `context_eval/comparison_table.md`.
@@ -154,6 +153,14 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+The Planning Agent (see "Run the planning agent" below) has its own extra dependencies
+(`langchain-groq`, `networkx`, `pydantic`) declared in [planning/requirements.txt](planning/requirements.txt).
+Install them too if you plan to run `agent/planning_client.py`:
+
+```bash
+pip install -r planning/requirements.txt
+```
+
 ### Environment variables
 
 Create a root-level `.env` file with at least the following values:
@@ -178,6 +185,27 @@ python agent/client.py
 
 The agent client drives the MCP server over stdio and exercises the tools, prompts, policies, and tool-calling loop.
 
+### Run the planning agent
+
+The Planning Agent is a **separate entry point**, [agent/planning_client.py](agent/planning_client.py). It runs
+independently of `agent/client.py` — a different process with its own MCP stdio session — but shares the same
+underlying resources: it spawns the same `mcp_server/` (`python -m mcp_server.server`) and that server reads/writes
+the same on-disk `db/aurelia.db`. Nothing in `agent/client.py` is imported, called, or modified to make this work.
+
+```bash
+# Run with the built-in demo goal
+python agent/planning_client.py
+
+# Run with your own goal
+python agent/planning_client.py "Plan a 2-day offsite for 60 people, confirm the deposit for EVT_999."
+
+# Interleave planning and execution one step at a time instead of building the full DAG up front
+python agent/planning_client.py "<goal>" --mode dynamic --max-steps 8
+```
+
+Both agents can be run separately, or at the same time in two terminals — each opens its own MCP server subprocess
+and neither one depends on the other being started first.
+
 ## Evaluation and Tests
 
 Several subprojects use deterministic evaluation and unittest-style regression coverage:
@@ -193,10 +221,16 @@ The context evaluation flow compares strategy outputs and writes artifacts to th
 
 ```text
 agent/
+  client.py             # Memory/RAG agent entry point
+  planning_client.py     # Planning Agent entry point (separate process, shared resources)
+  planning_agent_executor.py
+  planning_router.py
 context_eval/
 db/
 mcp_server/
 memory/
+planning/
+planning_eval/
 rag/
 retrieval_eval/
 README.md
