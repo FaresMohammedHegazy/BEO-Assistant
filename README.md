@@ -111,6 +111,7 @@ The repository ships a deterministic evaluator that rewinds the full BEO recall 
  
 ```bash
 python context_eval/evaluate.py
+python planning_eval/evaluate_planning.py
 ```
  
 That command loads the test corpus from the suite file, applies the four context-selection strategies, checks whether the critical operational fact survives after pruning, and writes a markdown comparison table to `context_eval/comparison_table.md`.
