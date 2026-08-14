@@ -7,6 +7,12 @@ sentence-transformers
 scikit-learn
 numpy
 
+# Planning agent (Decomposition & Planning Lab) dependencies
+langchain-groq>=0.2,<1
+networkx>=3.4,<3.5
+pydantic>=2.7,<3
+
 # Optional development/testing packages do not need to be declared here unless
 # the environment is expected to run the full regression suite from a fresh
 # install. The repository uses unittest from the standard library.
+pytest>=8,<9
