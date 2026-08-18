@@ -51,6 +51,29 @@ def setup_database():
         )
     ''')
 
+    # 5. Agent Tools Table (For Dynamic Tool Assignment)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS agent_tools (
+            agent_name TEXT NOT NULL,
+            tool_name TEXT NOT NULL,
+            is_active BOOLEAN NOT NULL DEFAULT 1,
+            PRIMARY KEY (agent_name, tool_name)
+        )
+    ''')
+
+    # 6. Admin Tickets Table (For HITL and Failure Recovery)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS admin_tickets (
+            ticket_id TEXT PRIMARY KEY,
+            graph_id TEXT NOT NULL,
+            thread_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            state_snapshot TEXT,
+            error_message TEXT
+        )
+    ''')
+
+
     # --- SEED DATA (THE TRAPS) ---
 
     # Trap 1: The Ballroom capped at 300 (For Defensive Design)
@@ -90,6 +113,23 @@ def setup_database():
         INSERT OR IGNORE INTO safe_ingredients (ingredient_id, name, is_nut_free, is_vegan) 
         VALUES (?, ?, ?, ?)
     ''', ingredients)
+
+
+    # --- SEED AGENT TOOLS (DYNAMIC ASSIGNMENTS) ---
+    # Assigns the existing MCP server tools to specific agents.
+    agent_tools_seed = [
+        ('planning_agent', 'audit_chain_wide_availability', 1),
+        ('planning_agent', 'book_event_room', 1),
+        ('planning_agent', 'view_event_deposit_status', 1),
+        ('memory_agent', 'draft_custom_menu', 1),
+        ('state_graph_agent', 'confirm_event_booking', 1),
+        ('state_graph_agent', 'authenticate_director', 1)
+    ]
+    cursor.executemany('''
+        INSERT OR IGNORE INTO agent_tools (agent_name, tool_name, is_active) 
+        VALUES (?, ?, ?)
+    ''', agent_tools_seed)
+
 
     conn.commit()
     conn.close()
