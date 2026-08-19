@@ -52,7 +52,7 @@ async def _default_llm_generate(prompt: str) -> str:
     from groq import AsyncGroq
     api_key = (os.getenv("GROQ_API_KEY") or "").strip()
     client = AsyncGroq(api_key=api_key)
-    model = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
+    model = os.getenv("MODEL_NAME", "openai/gpt-oss-120b")
     response = await client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": prompt}],

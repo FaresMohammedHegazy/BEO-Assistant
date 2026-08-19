@@ -20,7 +20,7 @@ BREAKOUT_REQUEST = (
 )
 
 def run_tot_demo():
-    llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.4)
+    llm = ChatGroq(model="openai/gpt-oss-120b", temperature=0.4)
 
     print("==========================================================")
     print("TREE OF THOUGHTS (GROUNDED DB EVALUATION)")

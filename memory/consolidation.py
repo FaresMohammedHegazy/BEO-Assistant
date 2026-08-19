@@ -9,7 +9,7 @@ class SemanticConsolidator:
         self.semantic_store = semantic_store
         self.episodic_store = episodic_store
         self.groq_client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
-        self.model = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
+        self.model = os.getenv("MODEL_NAME", "openai/gpt-oss-120b")
         
     async def run_consolidation_pass(self, max_age_days: int = 90):
         """

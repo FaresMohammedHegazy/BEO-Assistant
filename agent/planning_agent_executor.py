@@ -21,7 +21,7 @@ from planning.planning_lab.algorithms.dynamic_decomposition import (
 
 load_dotenv()
 
-MODEL_NAME = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
+MODEL_NAME = os.getenv("MODEL_NAME", "openai/gpt-oss-120b")
 
 
 @dataclass
