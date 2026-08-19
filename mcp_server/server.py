@@ -225,6 +225,18 @@ async def list_tools() -> list[types.Tool]:
             }
         ),
         types.Tool(
+            name="check_ingredient_stock",
+            description="Check the current stock quantity and safety flags for one ingredient by name.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "ingredient_name": {"type": "string", "description": "Exact ingredient name."}
+                },
+                "required": ["ingredient_name"],
+                "additionalProperties": False
+            }
+        ),
+        types.Tool(
             name="view_event_deposit_status",
             description="View the current status and required deposit for an event.",
             inputSchema={
@@ -400,7 +412,28 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
 
         menu = sampling_response.content.text if sampling_response else "Sampling failed."
         return [types.TextContent(type="text", text=f"Custom Menu Drafted via Sampling:\n{menu}")]
+    
+    elif name == "check_ingredient_stock":
+        ingredient_name = arguments.get("ingredient_name")
 
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT is_nut_free, is_vegan, stock_quantity FROM safe_ingredients WHERE name = ?",
+            (ingredient_name,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row:
+            return [types.TextContent(type="text", text=f"Ingredient '{ingredient_name}' not found.")]
+
+        is_nut_free, is_vegan, stock = row
+        return [types.TextContent(
+            type="text",
+            text=f"{ingredient_name}: stock={stock}, nut_free={bool(is_nut_free)}, vegan={bool(is_vegan)}"
+        )]
+    
     elif name == "confirm_event_booking":
         event_id = arguments.get("event_id")
 
