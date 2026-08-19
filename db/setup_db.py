@@ -1,5 +1,6 @@
 import sqlite3
 import os
+from langgraph.checkpoint.sqlite import SqliteSaver 
 
 def setup_database():
     # Ensure the db folder exists and create the SQLite file
@@ -133,7 +134,17 @@ def setup_database():
 
     conn.commit()
     conn.close()
+
+    # LangGraph Checkpoint Tables 
+    # Creates the checkpoints / checkpoint_blobs / checkpoint_writes tables
+    # that every state graph agent will use, inside the SAME aurelia.db
+    # file — not a separate database — using the official
+    # langgraph-checkpoint-sqlite library instead of hand-rolled SQL.
+    with SqliteSaver.from_conn_string(db_path) as checkpointer:
+        checkpointer.setup()
+
     print(f"Database successfully created and seeded at {db_path}")
+    print("LangGraph checkpoint tables initialized in the same database.")
 
 if __name__ == "__main__":
     setup_database()
