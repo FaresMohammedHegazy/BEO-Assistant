@@ -35,6 +35,58 @@ class VectorStoreTests(unittest.TestCase):
         self.assertTrue(filtered)
         self.assertEqual(filtered[0]["id"], "doc-2")
 
+    def test_add_document_returns_id_and_is_searchable(self):
+        embedder = SentenceEmbeddingModel(model_name="sentence-transformers/all-MiniLM-L6-v2")
+        store = VectorStore(store_path=self.store_path, embedder=embedder)
+        store.initialize()
+
+        doc_id = store.add_document("Aurelia deposit refund policy", metadata={"source": "policy"})
+        self.assertTrue(doc_id.startswith("doc-"))
+
+        results = store.search("deposit refund policy", top_k=3)
+        self.assertTrue(any(r["id"] == doc_id for r in results))
+
+    def test_delete_document_removes_from_next_search_without_restart(self):
+        embedder = SentenceEmbeddingModel(model_name="sentence-transformers/all-MiniLM-L6-v2")
+        store = VectorStore(store_path=self.store_path, embedder=embedder)
+        store.initialize()
+
+        doc_id = store.add_document("Aurelia vendor cancellation policy", metadata={"source": "policy"})
+        self.assertTrue(any(r["id"] == doc_id for r in store.search("vendor cancellation", top_k=3)))
+
+        deleted = store.delete_document(doc_id)
+        self.assertTrue(deleted)
+
+        # Same store instance, no re-initialize() / restart -- the very next
+        # query must no longer surface the deleted document.
+        results_after = store.search("vendor cancellation", top_k=3)
+        self.assertFalse(any(r["id"] == doc_id for r in results_after))
+
+        # Deleting an id that no longer exists reports False, not an error.
+        self.assertFalse(store.delete_document(doc_id))
+
+    def test_readd_document_clears_stale_metadata(self):
+        embedder = SentenceEmbeddingModel(model_name="sentence-transformers/all-MiniLM-L6-v2")
+        store = VectorStore(store_path=self.store_path, embedder=embedder)
+        store.initialize()
+
+        store.add_documents([
+            {"id": "doc-stale", "text": "Original text", "metadata": {"category": "old"}}
+        ])
+        self.assertTrue(store.search("original text", filters={"category": "old"}, top_k=3))
+
+        # Re-add the SAME id with a completely different metadata key.
+        store.add_documents([
+            {"id": "doc-stale", "text": "Updated text", "metadata": {"topic": "new"}}
+        ])
+
+        # The stale "category: old" filter must no longer match this document.
+        stale_match = store.search("updated text", filters={"category": "old"}, top_k=3)
+        self.assertFalse(any(r["id"] == "doc-stale" for r in stale_match))
+
+        fresh_match = store.search("updated text", filters={"topic": "new"}, top_k=3)
+        self.assertTrue(any(r["id"] == "doc-stale" for r in fresh_match))
+
 
 if __name__ == "__main__":
     unittest.main()
