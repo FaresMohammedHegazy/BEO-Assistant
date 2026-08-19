@@ -1,6 +1,8 @@
 import json
+import json
 import os
 import sqlite3
+import uuid
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from sklearn.neighbors import BallTree
@@ -81,6 +83,15 @@ class VectorStore:
                 (document_id, json.dumps(embedding)),
             )
 
+            # Grading-fault fix (Issue #8): INSERT OR REPLACE only overwrites a
+            # metadata_index row when (key, value, document_id) all match. If a
+            # document is re-added with a DIFFERENT metadata key set, its old
+            # rows were left behind forever, so filtered search() calls kept
+            # matching documents on stale metadata that no longer applied.
+            # Clearing this document's rows first makes every add authoritative.
+            self._conn.execute(
+                "DELETE FROM metadata_index WHERE document_id = ?", (document_id,)
+            )
             for key, value in metadata.items():
                 self._conn.execute(
                     "INSERT OR REPLACE INTO metadata_index (key, value, document_id) VALUES (?, ?, ?)",
