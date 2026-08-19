@@ -1,6 +1,8 @@
 import json
+import json
 import os
 import sqlite3
+import uuid
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from sklearn.neighbors import BallTree
@@ -81,6 +83,15 @@ class VectorStore:
                 (document_id, json.dumps(embedding)),
             )
 
+            # Grading-fault fix (Issue #8): INSERT OR REPLACE only overwrites a
+            # metadata_index row when (key, value, document_id) all match. If a
+            # document is re-added with a DIFFERENT metadata key set, its old
+            # rows were left behind forever, so filtered search() calls kept
+            # matching documents on stale metadata that no longer applied.
+            # Clearing this document's rows first makes every add authoritative.
+            self._conn.execute(
+                "DELETE FROM metadata_index WHERE document_id = ?", (document_id,)
+            )
             for key, value in metadata.items():
                 self._conn.execute(
                     "INSERT OR REPLACE INTO metadata_index (key, value, document_id) VALUES (?, ?, ?)",
@@ -90,6 +101,50 @@ class VectorStore:
         self._conn.commit()
         self._rebuild_ann_index_from_db()
 
+    def add_document(self, text: str, metadata: Optional[Dict[str, Any]] = None) -> str:
+        """Add ONE admin-supplied document as a single row and return its id.
+
+        This is the entry point the admin platform (Issues #10/#11) calls
+        when someone pastes or uploads a single policy document. Unlike
+        add_texts()/populate_rag.py's bulk ingestion (which chunks long text
+        into several rows), one call here is always exactly one row and one
+        id -- so the id returned is exactly what a later delete_document()
+        call needs, with no ambiguity about which chunks belong together.
+        """
+        if self._conn is None:
+            self.initialize()
+
+        document_id = f"doc-{uuid.uuid4().hex[:12]}"
+        self.add_documents([{
+            "id": document_id,
+            "text": text,
+            "metadata": metadata or {},
+            "chunk_index": 0,
+        }])
+        return document_id
+
+    def delete_document(self, doc_id: str) -> bool:
+        """Remove one document, its embedding, and its metadata_index rows,
+        then rebuild the ANN index so the very next search() call no longer
+        returns it -- no process restart required. Returns False if doc_id
+        didn't exist.
+        """
+        if self._conn is None:
+            self.initialize()
+
+        exists = self._conn.execute(
+            "SELECT 1 FROM documents WHERE id = ?", (doc_id,)
+        ).fetchone()
+        if exists is None:
+            return False
+
+        self._conn.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+        self._conn.execute("DELETE FROM embeddings WHERE document_id = ?", (doc_id,))
+        self._conn.execute("DELETE FROM metadata_index WHERE document_id = ?", (doc_id,))
+        self._conn.commit()
+        self._rebuild_ann_index_from_db()
+        return True
+    
     def chunk_text(self, text: str, chunk_size: int = 300, overlap: int = 50) -> List[str]:
         words = text.split()
         chunks = []
