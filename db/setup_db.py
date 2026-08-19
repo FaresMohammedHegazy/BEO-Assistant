@@ -48,7 +48,8 @@ def setup_database():
             ingredient_id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
             is_nut_free BOOLEAN NOT NULL,
-            is_vegan BOOLEAN NOT NULL
+            is_vegan BOOLEAN NOT NULL,
+            stock_quantity INTEGER NOT NULL DEFAULT 0
         )
     ''')
 
@@ -124,7 +125,8 @@ def setup_database():
         ('planning_agent', 'view_event_deposit_status', 1),
         ('memory_agent', 'draft_custom_menu', 1),
         ('state_graph_agent', 'confirm_event_booking', 1),
-        ('state_graph_agent', 'authenticate_director', 1)
+        ('state_graph_agent', 'authenticate_director', 1),
+        ('vip_dietary_agent', 'check_ingredient_stock', 1)
     ]
     cursor.executemany('''
         INSERT OR IGNORE INTO agent_tools (agent_name, tool_name, is_active) 
