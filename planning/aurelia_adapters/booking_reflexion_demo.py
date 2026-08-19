@@ -22,7 +22,7 @@ BOOKING_REQUEST = (
 )
 
 def run_reflexion_demo():
-    llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.2)
+    llm = ChatGroq(model="openai/gpt-oss-120b", temperature=0.2)
     
     # The grounded environment automatically checks the SQLite database constraints
     environment = Environment(success_threshold=1.0)

@@ -17,7 +17,7 @@ from rag.vector_store import VectorStore
 from rag.retrievers import HybridRAG
 from rag.self_rag import SelfRAG
 load_dotenv()
-MODEL = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
+MODEL = os.getenv("MODEL_NAME", "openai/gpt-oss-120b")
 REPO_ROOT = os.path.dirname(os.path.dirname(__file__))
 
 class BEODemoAgent:

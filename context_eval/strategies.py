@@ -113,7 +113,7 @@ async def apply_recursive_summarization(messages, compact_every=15, client=None,
         client = AsyncGroq(api_key=api_key)
 
     if not model:
-        model = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
+        model = os.getenv("MODEL_NAME", "openai/gpt-oss-120b")
 
     try:
         response = await client.chat.completions.create(

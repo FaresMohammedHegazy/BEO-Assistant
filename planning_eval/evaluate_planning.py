@@ -31,7 +31,7 @@ ALGORITHM_LABELS = {
     "lats": "LATS",
     "self_refine": "Self-Refine",
 }
-# Approximate Groq llama-3.3-70b-versatile blended token rate (USD / token).
+# Approximate Groq openai/gpt-oss-120b blended token rate (USD / token).
 COST_PER_TOKEN = 0.00000069
 def _estimate_tokens(messages_or_text) -> int:
     if isinstance(messages_or_text, list):
@@ -229,7 +229,7 @@ async def run_evaluation() -> list[dict]:
     from planning.planning_lab.algorithms.environment import Environment
 
     load_dotenv()
-    model_name = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
+    model_name = os.getenv("MODEL_NAME", "openai/gpt-oss-120b")
 
     with open(SUITE_PATH, "r", encoding="utf-8") as f:
         scenarios = {item["id"]: item for item in json.load(f)}

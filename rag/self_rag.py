@@ -5,7 +5,7 @@ from groq import Groq
 class SelfRAG:
     """Explicit safeguard to prevent the model from trusting bad returns."""
     
-    def __init__(self, model_name: str = "llama-3.3-70b-versatile"):
+    def __init__(self, model_name: str = "openai/gpt-oss-120b"):
         api_key = os.getenv("GROQ_API_KEY")
         self.llm = Groq(api_key=api_key) if api_key else None
         self.model = model_name

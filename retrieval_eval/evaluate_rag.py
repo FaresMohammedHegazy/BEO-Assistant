@@ -23,7 +23,7 @@ try:
 except ImportError:
     print("Warning: Ensure NaiveRAG, HybridRAG, and AgenticRAG are properly defined in rag.retrievers")
 
-def generate_answer(query: str, docs: List[Dict[str, Any]], client: Groq, model="llama-3.3-70b-versatile") -> str:
+def generate_answer(query: str, docs: List[Dict[str, Any]], client: Groq, model="openai/gpt-oss-120b") -> str:
     """Generate an answer based on the retrieved documents."""
     if not docs:
         return "No information found."

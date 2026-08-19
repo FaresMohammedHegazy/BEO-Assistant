@@ -45,7 +45,7 @@ from agent.planning_router import PlanningRouter
 
 load_dotenv()
 
-MODEL_NAME = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
+MODEL_NAME = os.getenv("MODEL_NAME", "openai/gpt-oss-120b")
 
 DEFAULT_GOAL = (
     "We're planning our annual leadership summit: 3 days, ~150 attendees "

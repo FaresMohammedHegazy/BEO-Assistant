@@ -23,7 +23,7 @@ from planning.planning_lab.algorithms.environment import Environment
 from agent.planning_agent_executor import PlanningAgentExecutor
 from agent.planning_router import PlanningRouter
 
-MODEL_NAME = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
+MODEL_NAME = os.getenv("MODEL_NAME", "openai/gpt-oss-120b")
 OUTPUT_PATH = os.path.join(os.path.dirname(__file__), "algorithm_demo_prompts.json")
 
 
