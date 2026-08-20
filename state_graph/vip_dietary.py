@@ -24,6 +24,7 @@ from langgraph.types import interrupt
 
 from state_graph.mcp_client import open_mcp_session
 from state_graph.tickets import raise_ticket, open_hitl_ticket
+from state_graph.recovery import with_error_handling
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_DB_PATH = os.path.join(REPO_ROOT, "db", "aurelia.db")
@@ -116,6 +117,7 @@ def _all_combos(pool: list[str]) -> list[list[str]]:
 
 
 def make_lats_search(llm_generate):
+    @with_error_handling("vip_dietary_agent", "lats_search")
     async def lats_search(state: VipDietaryState) -> dict:
         pool = state["candidate_pool"]
         tried = list(state.get("tried_combos", []))
@@ -145,6 +147,7 @@ def make_lats_search(llm_generate):
 
 
 def make_inventory_check(check_stock):
+    @with_error_handling("vip_dietary_agent", "inventory_check")
     async def inventory_check(state: VipDietaryState) -> dict:
         combo = state["current_combo"]
         for ingredient in combo:

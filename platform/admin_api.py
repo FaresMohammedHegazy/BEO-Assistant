@@ -1,3 +1,4 @@
+from state_graph.recovery import resume_from_ticket
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 import sqlite3
@@ -93,6 +94,17 @@ async def post_ticket_decision(ticket_id: str, body: AdminDecision):
             payload=body.payload,
             db_path=DB_PATH,
         )
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "resumed", "ticket_id": ticket_id, "graph_state": result_state}
+
+@router.post("/tickets/{ticket_id}/resume")
+async def post_ticket_resume(ticket_id: str):
+    """Resume an unplanned failure ticket from its exact checkpoint."""
+    try:
+        result_state = await resume_from_ticket(ticket_id)
     except LookupError:
         raise HTTPException(status_code=404, detail="Ticket not found")
     except ValueError as e:

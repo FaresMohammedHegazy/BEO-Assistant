@@ -91,6 +91,7 @@ if REPO_ROOT not in sys.path:
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, StateGraph
+from state_graph.recovery import with_error_handling
 
 # Define the database path dynamically, matching mcp_server/server.py's convention.
 DB_PATH = os.path.join(REPO_ROOT, 'db', 'aurelia.db')
@@ -155,6 +156,7 @@ def _fetch_event(event_id: str) -> dict:
 # NODE: generate_invoice
 # ---------------------------------------------------------------------------
 
+@with_error_handling("billing_dispute", "generate_invoice")
 def generate_invoice(state: BillingDisputeState) -> dict:
     event = _fetch_event(state["event_id"])
     subtotal = round(event["headcount"] * PER_GUEST_RATE, 2)
@@ -236,7 +238,7 @@ _RECONCILIATION_SUBTASKS = [
     ),
 ]
 
-
+@with_error_handling("billing_dispute", "reconcile_ledger")
 def reconcile_ledger(state: BillingDisputeState) -> dict:
     trace = []
     subtask_state = dict(state)
@@ -335,7 +337,7 @@ def _score_candidate(strategy: dict, state: BillingDisputeState) -> float:
 
     return round(score, 3)
 
-
+@with_error_handling("billing_dispute", "draft_dispute_email")
 def draft_dispute_email(state: BillingDisputeState) -> dict:
     candidates = []
     for strategy in _STRATEGIES:
