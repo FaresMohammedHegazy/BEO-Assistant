@@ -1,17 +1,18 @@
-from state_graph.recovery import resume_from_ticket
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-import sqlite3
 import os
 import sys
 
-# Import VectorStore from your existing RAG module
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+import sqlite3
+
 from rag.vector_store import VectorStore
 from state_graph.tickets import get_ticket, list_tickets
 from state_graph.hitl import submit_admin_decision
+from state_graph.recovery import resume_from_ticket
 
 router = APIRouter()
 DB_PATH = os.path.join(REPO_ROOT, 'db', 'aurelia.db')
