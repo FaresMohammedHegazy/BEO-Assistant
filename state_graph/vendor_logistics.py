@@ -12,7 +12,7 @@ from rag.retrievers import NaiveRAG
 from planning.planning_lab.algorithms.decomposition import decompose_goal, execute_plan
 from state_graph.mcp_client import open_mcp_session
 from state_graph.checkpointer import DEFAULT_DB_PATH
-from state_graph.tickets import raise_ticket
+from state_graph.tickets import raise_ticket, open_hitl_ticket
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +102,24 @@ def wait_for_vendor_reply(state: VendorLogisticsState, config: Dict[str, Any]) -
         # HITL Condition Evaluation: Check if proposal exceeds budget
         proposal_amount = state.get("vendor_proposal_amount", 0.0)
         if proposal_amount > state["budget"]:
-            return {"status": "hitl_approval_required"}
+            # The graph is about to pause (interrupt_before=["hitl_approval"])
+            # immediately after this node returns, so open the pending_admin
+            # ticket here -- this node only runs once per pause (unlike a
+            # dynamic `interrupt()` node, a static interrupt_before pause
+            # does not replay the node that led into it).
+            checkpoint_ns = config.get("configurable", {}).get("checkpoint_ns", "")
+            ticket_id = open_hitl_ticket(
+                graph_id="vendor_logistics",
+                thread_id=state.get("thread_id", "unknown"),
+                reason=(
+                    f"Vendor proposal ${proposal_amount:,.2f} for "
+                    f"{state.get('vendor_name', 'vendor')} exceeds budget "
+                    f"${state['budget']:,.2f} -- needs admin approval."
+                ),
+                state_snapshot=json.dumps(state),
+                checkpoint_ns=checkpoint_ns,
+            )
+            return {"status": "hitl_approval_required", "ticket_id": ticket_id}
             
         return {"status": "ready_to_finalize"}
     except Exception as e:
@@ -185,11 +202,24 @@ def build_vendor_logistics_graph():
     return workflow
 
 # --- Compilation with Checkpointer ---
-# This expects to be called within the `async with get_checkpointer() as checkpointer:` block 
-# from `state_graph/checkpointer.py`.
-#
-# Usage example:
-# graph = build_vendor_logistics_graph().compile(
-#     checkpointer=checkpointer, 
-#     interrupt_before=["wait_for_vendor_reply", "hitl_approval"]
-# )
+def compile_vendor_logistics_graph(checkpointer=None):
+    """Compile the vendor logistics workflow against the shared checkpointer.
+
+    Pauses before `wait_for_vendor_reply` (an external wait on the vendor's
+    reply, resumed by a webhook once that arrives) and before
+    `hitl_approval` (the admin-facing HITL node, resumed via
+    state_graph.hitl.submit_admin_decision once an admin acts on the
+    pending_admin ticket opened in `wait_for_vendor_reply`).
+
+    Expected to be called within the
+    `async with get_checkpointer() as checkpointer:` block from
+    `state_graph/checkpointer.py`, e.g.:
+
+        async with get_checkpointer() as checkpointer:
+            graph = compile_vendor_logistics_graph(checkpointer)
+            await graph.ainvoke(initial_state, config=config)
+    """
+    return build_vendor_logistics_graph().compile(
+        checkpointer=checkpointer,
+        interrupt_before=["wait_for_vendor_reply", "hitl_approval"],
+    )
