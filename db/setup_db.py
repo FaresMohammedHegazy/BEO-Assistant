@@ -64,6 +64,11 @@ def setup_database():
     ''')
 
     # 6. Admin Tickets Table (For HITL and Failure Recovery)
+    #
+    # status lifecycle:
+    #   'open'          -- an unrecoverable node failure (see state_graph/tickets.raise_ticket)
+    #   'pending_admin' -- a graph is paused on a HITL node waiting on an admin decision
+    #   'resolved'      -- an admin has submitted a decision for a 'pending_admin' ticket
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS admin_tickets (
             ticket_id TEXT PRIMARY KEY,
@@ -71,9 +76,27 @@ def setup_database():
             thread_id TEXT NOT NULL,
             status TEXT NOT NULL,
             state_snapshot TEXT,
-            error_message TEXT
+            error_message TEXT,
+            checkpoint_ns TEXT NOT NULL DEFAULT '',
+            decision TEXT,
+            decision_payload TEXT,
+            created_at TEXT,
+            resolved_at TEXT
         )
     ''')
+
+    # Backfill columns for an aurelia.db created before this change, since
+    # `CREATE TABLE IF NOT EXISTS` above is a no-op against an existing table.
+    existing_cols = {row[1] for row in cursor.execute("PRAGMA table_info(admin_tickets)")}
+    for col_name, alter_sql in [
+        ("checkpoint_ns", "ALTER TABLE admin_tickets ADD COLUMN checkpoint_ns TEXT NOT NULL DEFAULT ''"),
+        ("decision", "ALTER TABLE admin_tickets ADD COLUMN decision TEXT"),
+        ("decision_payload", "ALTER TABLE admin_tickets ADD COLUMN decision_payload TEXT"),
+        ("created_at", "ALTER TABLE admin_tickets ADD COLUMN created_at TEXT"),
+        ("resolved_at", "ALTER TABLE admin_tickets ADD COLUMN resolved_at TEXT"),
+    ]:
+        if col_name not in existing_cols:
+            cursor.execute(alter_sql)
 
 
     # --- SEED DATA (THE TRAPS) ---

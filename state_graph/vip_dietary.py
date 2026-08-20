@@ -23,7 +23,7 @@ from langgraph.graph import StateGraph, END
 from langgraph.types import interrupt
 
 from state_graph.mcp_client import open_mcp_session
-from state_graph.tickets import raise_ticket
+from state_graph.tickets import raise_ticket, open_hitl_ticket
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_DB_PATH = os.path.join(REPO_ROOT, "db", "aurelia.db")
@@ -160,16 +160,36 @@ def make_inventory_check(check_stock):
     return inventory_check
 
 
-def chef_signoff(state: VipDietaryState) -> dict:
-    decision = interrupt({
-        "type": "hitl_menu_approval",
-        "event_id": state["event_id"],
-        "guest_id": state["guest_id"],
-        "proposed_combo": state["current_combo"],
-        "reason": "Mandatory executive chef sign-off before an irreversible "
-                  "VIP allergy-safe menu change.",
-    })
-    return {"chef_decision": decision.get("decision", "reject")}
+def make_chef_signoff(db_path: str):
+    def chef_signoff(state: VipDietaryState) -> dict:
+        # Open (or, on a LangGraph replay of this node after resume, reuse) a
+        # pending_admin ticket in admin_tickets *before* interrupting, so
+        # the admin dashboard has something to show for as long as the
+        # graph is paused here. open_hitl_ticket is idempotent per
+        # (graph_id, thread_id) specifically so this is safe to call again
+        # if the node body replays.
+        open_hitl_ticket(
+            graph_id="vip_dietary_agent",
+            thread_id=state.get("_thread_id", "unknown"),
+            reason=(
+                f"Mandatory chef sign-off required for guest {state.get('guest_id')} "
+                f"(event {state.get('event_id')}): proposed pairing "
+                f"{state.get('current_combo')}."
+            ),
+            state_snapshot=json.dumps(state, default=str),
+            db_path=db_path,
+        )
+        decision = interrupt({
+            "type": "hitl_menu_approval",
+            "event_id": state["event_id"],
+            "guest_id": state["guest_id"],
+            "proposed_combo": state["current_combo"],
+            "reason": "Mandatory executive chef sign-off before an irreversible "
+                      "VIP allergy-safe menu change.",
+        })
+        return {"chef_decision": decision.get("decision", "reject")}
+
+    return chef_signoff
 
 
 def record_chef_decision(state: VipDietaryState) -> dict:
@@ -244,7 +264,7 @@ def build_vip_dietary_graph(llm_generate=None, check_stock=None,
     builder.add_node("fetch_guest_constraints", make_fetch_guest_constraints(resolved_db_path))
     builder.add_node("lats_search", make_lats_search(llm_generate))
     builder.add_node("inventory_check", make_inventory_check(check_stock))
-    builder.add_node("chef_signoff", chef_signoff)
+    builder.add_node("chef_signoff", make_chef_signoff(resolved_db_path))
     builder.add_node("record_chef_decision", record_chef_decision)
     builder.add_node("confirmed", confirmed)
     builder.add_node("ticket_exhausted", make_ticket_exhausted(resolved_db_path))

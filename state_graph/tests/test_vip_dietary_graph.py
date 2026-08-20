@@ -29,7 +29,9 @@ def _make_temp_db(stock_overrides: dict[str, int]) -> str:
         ingredient_id TEXT PRIMARY KEY, name TEXT, is_nut_free BOOLEAN, is_vegan BOOLEAN)""")
     cur.execute("""CREATE TABLE admin_tickets (
         ticket_id TEXT PRIMARY KEY, graph_id TEXT, thread_id TEXT,
-        status TEXT, state_snapshot TEXT, error_message TEXT)""")
+        status TEXT, state_snapshot TEXT, error_message TEXT,
+        checkpoint_ns TEXT NOT NULL DEFAULT '', decision TEXT,
+        decision_payload TEXT, created_at TEXT, resolved_at TEXT)""")
 
     cur.execute("INSERT INTO guests VALUES (?, ?, ?, ?)",
                 ("GUEST_VIP_1", "Eleanor Vance", 1, "SEVERE NUT ALLERGY, VEGAN"))
@@ -93,10 +95,34 @@ class TestVipDietaryGraph(unittest.IsolatedAsyncioTestCase):
             payload = pending_interrupts[0].value
             self.assertEqual(payload["proposed_combo"], ["Quinoa", "Tofu"])
 
+            # Issue #71: pausing on chef_signoff must write a pending_admin
+            # ticket to admin_tickets so the admin dashboard has something
+            # to show while the graph is paused.
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT status, graph_id, thread_id FROM admin_tickets"
+            )
+            rows = cur.fetchall()
+            conn.close()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0], ("pending_admin", "vip_dietary_agent", "test-thread-vip-1"))
+
             resumed = await graph.ainvoke(Command(resume={"decision": "approve"}), config=config)
             self.assertEqual(resumed["status"], "CONFIRMED")
             self.assertIn("Quinoa", resumed["final_menu"])
             self.assertIn("Tofu", resumed["final_menu"])
+
+            # chef_signoff's body replays on resume (LangGraph re-runs a
+            # dynamic-interrupt node from the top), so open_hitl_ticket's
+            # idempotency must have kept this at exactly one row rather than
+            # inserting a second pending_admin ticket for the same pause.
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM admin_tickets")
+            count = cur.fetchone()[0]
+            conn.close()
+            self.assertEqual(count, 1)
 
         os.remove(db_path)
 
