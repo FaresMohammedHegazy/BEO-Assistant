@@ -5,6 +5,7 @@ __pycache__/
 venv/
 env/
 .mcp/
+node_modules/
 
 # IDEs
 .vscode/
