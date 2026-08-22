@@ -88,3 +88,33 @@ npm run dev
 
 1. Open your web browser and navigate to:
 **`http://localhost:3000/admin`**
+
+---
+
+### Step 7: Access the End-User Chat
+
+1. Open your web browser and navigate to:
+**`http://localhost:3000/chat`**
+
+2. Pick an agent from the left-hand switcher:
+   - **Memory & RAG Concierge** and **Planning Agent** are free-form chat --
+     type a message to start. Both need `GROQ_API_KEY` set in your environment
+     (see the repo root `README`/`.env` setup); the Memory & RAG Concierge
+     also needs the `mcp_server` package importable, since it spawns
+     `python -m mcp_server.server` as a subprocess for the life of the chat.
+   - **VIP Dietary Handoff**, **Vendor Logistics**, and **Post-Event Billing**
+     are the three `state_graph/` agents. Each needs a small structured form
+     (an event ID, etc. -- the seeded database from Step 2 includes `EVT_999`
+     / `GUEST_VIP_1` to try this with) before it starts, since they aren't
+     free-text goals. Vendor Logistics additionally needs `GROQ_API_KEY` for
+     its planning step; Post-Event Billing does not (see
+     `state_graph/billing_dispute.py`'s module docstring).
+
+3. Once a state-graph agent pauses -- for mandatory chef sign-off, an
+   over-budget vendor quote, or a finance escalation -- the chat reports
+   that directly and keeps polling in the background. Resolve the pause from
+   the **HITL & Tickets** dashboard (`/admin/tickets`) the same way you
+   would for any other pending ticket; the chat picks up the resolution
+   automatically. Post-Event Billing negotiation happens the other way
+   around: keep replying in the chat (accept the invoice, or say what
+   looks wrong) until it either resolves directly or escalates.

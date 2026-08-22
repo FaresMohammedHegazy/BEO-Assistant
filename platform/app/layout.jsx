@@ -10,6 +10,7 @@ export default function RootLayout({ children }) {
     <html lang="en">
       <body className="bg-gray-50 text-gray-900">
         <nav className="border-b bg-white px-8 py-3 flex gap-6">
+          <a href="/chat" className="font-medium hover:underline">Chat</a>
           <a href="/admin" className="font-medium hover:underline">Tools &amp; RAG</a>
           <a href="/admin/tickets" className="font-medium hover:underline">HITL &amp; Tickets</a>
         </nav>
