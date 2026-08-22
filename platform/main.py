@@ -2,6 +2,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from admin_api import router  # This imports the router from the previous step
+from chat_api import router as chat_router  # Issue #74: end-user chat interface
 
 app = FastAPI()
 
@@ -14,5 +15,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount the router
+# Mount the routers
 app.include_router(router, prefix="/api/admin")
+app.include_router(chat_router, prefix="/api/chat")
