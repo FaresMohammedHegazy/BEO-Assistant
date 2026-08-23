@@ -199,12 +199,12 @@ class MemoryRagEngine:
         if self._session is not None:
             return
         from mcp.client.session import ClientSession
-        from mcp.client.streamable_http import streamable_http_client
+        from mcp.client.sse import sse_client
 
-        mcp_url = os.environ.get("MCP_SERVER_URL", "http://127.0.0.1:8765/mcp")
+        mcp_url = os.environ.get("MCP_SERVER_URL", "http://127.0.0.1:8765/sse")
         self._exit_stack = AsyncExitStack()
         read_stream, write_stream = await self._exit_stack.enter_async_context(
-            streamable_http_client(mcp_url)
+            sse_client(mcp_url)
         )
         self._session = await self._exit_stack.enter_async_context(
             ClientSession(read_stream, write_stream, sampling_callback=self._handle_sampling)
