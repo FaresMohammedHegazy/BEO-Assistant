@@ -3,6 +3,8 @@
 **A safety-first Model Context Protocol (MCP) server for Banquet Event Order management.**
 This repository implements a safety-oriented Banquet Event Order (BEO) assistant built around an MCP server, a SQLite-backed factual domain model, and a retrieval stack that can operate in Naive RAG, Hybrid RAG, and Agentic RAG modes.
 
+**[Click here for the Step-by-Step Live Demo & Quick Start Guide](DEMO.md)**
+
 The code now covers five primary areas:
 
 - An MCP server that exposes resources, prompts, and tools over stdio transport.
