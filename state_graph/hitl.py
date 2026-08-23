@@ -43,8 +43,8 @@ VALID_DECISIONS = ("approve", "reject", "modify")
 
 
 async def _resume_vip_dietary(graph, config: dict, decision: str, payload: Optional[dict]) -> dict:
-    resume_value = {"decision": decision, **(payload or {})}
-    return await graph.ainvoke(Command(resume=resume_value), config=config)
+    await graph.aupdate_state(config, {"chef_decision": decision})
+    return await graph.ainvoke(None, config=config)
 
 
 async def _resume_vendor_logistics(graph, config: dict, decision: str, payload: Optional[dict]) -> dict:

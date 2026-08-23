@@ -112,7 +112,7 @@ class SessionStore:
         elif agent_key == "vip_dietary":
             event_id = _require(fields, "event_id")
             guest_id = _require(fields, "guest_id")
-            thread_id = agents.new_thread_id()
+            thread_id = event_id
             result = await agents.start_vip_dietary(thread_id, event_id, guest_id)
             session = ChatSession(
                 session_id, agent_key, thread_id=thread_id,
@@ -125,7 +125,7 @@ class SessionStore:
             vendor_name = _require(fields, "vendor_name")
             logistics_goal = _require(fields, "logistics_goal")
             budget = _require_float(fields, "budget")
-            thread_id = agents.new_thread_id()
+            thread_id = event_id
             result = await agents.start_vendor_logistics(
                 thread_id, event_id, vendor_name, logistics_goal, budget
             )
