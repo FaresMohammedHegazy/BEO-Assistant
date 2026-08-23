@@ -81,9 +81,8 @@ async def resume_from_ticket(ticket_id: str) -> dict:
     
     async with get_checkpointer() as checkpointer:
         if graph_id == "billing_dispute":
-            graph = build_billing_dispute_graph() 
-            # Use sync invoke() here since billing_dispute uses a sync SqliteSaver
-            return graph.invoke(None, config) 
+            graph = build_billing_dispute_graph(checkpointer)
+            return await graph.ainvoke(None, config)
         elif graph_id == "vendor_logistics":
             graph = compile_vendor_logistics_graph(checkpointer)
             return await graph.ainvoke(None, config)

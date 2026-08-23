@@ -89,7 +89,6 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, StateGraph
 from state_graph.recovery import with_error_handling
 from state_graph.tickets import open_hitl_ticket
@@ -475,7 +474,7 @@ _ROUTE_MAP = {
 # Graph construction
 # ---------------------------------------------------------------------------
 
-def build_billing_dispute_graph(db_path: str = DB_PATH):
+def build_billing_dispute_graph(checkpointer):
     graph = StateGraph(BillingDisputeState)
 
     graph.add_node("generate_invoice", generate_invoice)
@@ -493,13 +492,6 @@ def build_billing_dispute_graph(db_path: str = DB_PATH):
     graph.add_edge("human_finance_review", "finalize_billing")
     graph.add_edge("finalize_billing", END)
 
-    if not os.path.exists(db_path):
-        raise RuntimeError(f"Database not found at {db_path}. Run `python db/setup_db.py` first.")
-
-    conn = sqlite3.connect(db_path, check_same_thread=False)
-    checkpointer = SqliteSaver(conn)
-    checkpointer.setup()  # idempotent; db/setup_db.py already runs this once too.
-
     return graph.compile(checkpointer=checkpointer, interrupt_before=["human_finance_review"])
 
 
@@ -507,28 +499,28 @@ def build_billing_dispute_graph(db_path: str = DB_PATH):
 # Public helpers for driving a persistent, multi-turn dispute thread
 # ---------------------------------------------------------------------------
 
-def run_turn(compiled_graph, event_id: str, **updates) -> dict:
+async def run_turn(compiled_graph, event_id: str, **updates) -> dict:
     """Run one turn of the billing-dispute graph for `event_id`.
 
     `updates` are merged into the persisted thread state before this turn
     runs, e.g.:
-        run_turn(graph, "EVT_999", client_status="DISPUTED",
-                 client_feedback="This headcount looks too high.")
+        await run_turn(graph, "EVT_999", client_status="DISPUTED",
+                        client_feedback="This headcount looks too high.")
     """
     config = {"configurable": {"thread_id": event_id}}
     payload = {"event_id": event_id, **updates}
-    return compiled_graph.invoke(payload, config)
+    return await compiled_graph.ainvoke(payload, config)
 
 
-def resume_after_finance_review(compiled_graph, event_id: str, decision: str) -> dict:
+async def resume_after_finance_review(compiled_graph, event_id: str, decision: str) -> dict:
     """Resume a graph paused at the human_finance_review breakpoint.
 
     `decision` is a short free-text summary of what the finance admin
     decided (e.g. "Approved a $200 goodwill write-off").
     """
     config = {"configurable": {"thread_id": event_id}}
-    compiled_graph.update_state(config, {"finance_decision": decision})
-    return compiled_graph.invoke(None, config)
+    await compiled_graph.aupdate_state(config, {"finance_decision": decision})
+    return await compiled_graph.ainvoke(None, config)
 
 
 # ---------------------------------------------------------------------------
@@ -540,38 +532,42 @@ def _print_state(label: str, state: dict) -> None:
     print(json.dumps(state, indent=2, default=str))
 
 
-def run_demo() -> None:
-    graph = build_billing_dispute_graph()
-    event_id = "EVT_999"
+async def run_demo() -> None:
+    from state_graph.checkpointer import get_checkpointer
 
-    state = run_turn(graph, event_id)
-    _print_state("Turn 1: invoice generated + ledger reconciled", state)
+    async with get_checkpointer() as checkpointer:
+        graph = build_billing_dispute_graph(checkpointer)
+        event_id = "EVT_999"
 
-    state = run_turn(
-        graph, event_id,
-        client_status="DISPUTED",
-        client_feedback="This headcount looks too high, I want it reviewed.",
-    )
-    _print_state("Turn 2: client disputed -> Tree-of-Thoughts drafted a negotiation email", state)
-    chosen = next(c for c in state["candidate_emails"] if c["body"] == state["draft_email"])
-    print(f"[ToT] Selected strategy: {chosen['strategy']} (score={chosen['score']})")
+        state = await run_turn(graph, event_id)
+        _print_state("Turn 1: invoice generated + ledger reconciled", state)
 
-    state = run_turn(
-        graph, event_id,
-        client_status="REJECTED_FINAL",
-        client_feedback="I'm not paying this. Final answer.",
-    )
-    _print_state("Turn 3: client explicitly rejected the final invoice -> escalated & paused", state)
+        state = await run_turn(
+            graph, event_id,
+            client_status="DISPUTED",
+            client_feedback="This looks too high for what we agreed.",
+        )
+        _print_state("Turn 2: client disputed -> Tree-of-Thoughts drafted a negotiation email", state)
+        chosen = next(c for c in state["candidate_emails"] if c["body"] == state["draft_email"])
+        print(f"[ToT] Selected strategy: {chosen['strategy']} (score={chosen['score']})")
 
-    snapshot = graph.get_state({"configurable": {"thread_id": event_id}})
-    print(f"\n[HITL] Graph paused before: {snapshot.next}")
-    print(f"[HITL] Open ticket: {state['escalation_ticket_id']}")
+        state = await run_turn(
+            graph, event_id,
+            client_status="REJECTED_FINAL",
+            client_feedback="I'm not paying this. Final answer.",
+        )
+        _print_state("Turn 3: client explicitly rejected the final invoice -> escalated & paused", state)
 
-    state = resume_after_finance_review(
-        graph, event_id, "Approved a $200 goodwill write-off; balance settled by phone."
-    )
-    _print_state("Turn 4: finance admin resolved the ticket, graph resumed to completion", state)
+        snapshot = await graph.aget_state({"configurable": {"thread_id": event_id}})
+        print(f"\n[HITL] Graph paused before: {snapshot.next}")
+        print(f"[HITL] Open ticket: {state['escalation_ticket_id']}")
+
+        state = await resume_after_finance_review(
+            graph, event_id, "Approved a $200 goodwill write-off; balance settled by phone."
+        )
+        _print_state("Turn 4: finance admin resolved the ticket, graph resumed to completion", state)
 
 
 if __name__ == "__main__":
-    run_demo()
+    import asyncio
+    asyncio.run(run_demo())

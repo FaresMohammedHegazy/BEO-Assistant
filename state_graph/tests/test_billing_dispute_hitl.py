@@ -40,20 +40,21 @@ def _make_temp_db() -> str:
     return path
 
 
-class FakeSyncGraph:
-    """Records how update_state / invoke (sync, matching billing_dispute's
-    SqliteSaver-backed compiled graph) were called."""
+class FakeGraph:
+    """Records how aupdate_state / ainvoke were called, now that
+    billing_dispute compiles against the shared AsyncSqliteSaver like the
+    other two graphs (see the checkpointer-unification commit)."""
 
     def __init__(self, result=None):
         self._result = result if result is not None else {"status": "done"}
-        self.invoke_calls = []
-        self.update_state_calls = []
+        self.ainvoke_calls = []
+        self.aupdate_state_calls = []
 
-    def update_state(self, config, values):
-        self.update_state_calls.append((config, values))
+    async def aupdate_state(self, config, values):
+        self.aupdate_state_calls.append((config, values))
 
-    def invoke(self, input_value, config):
-        self.invoke_calls.append((input_value, config))
+    async def ainvoke(self, input_value, config):
+        self.ainvoke_calls.append((input_value, config))
         return self._result
 
 
@@ -117,18 +118,18 @@ class TestHumanFinanceReview(unittest.TestCase):
 
 
 class TestResumeBillingDisputeAdapter(unittest.IsolatedAsyncioTestCase):
-    async def test_writes_finance_decision_and_invokes_sync(self):
-        graph = FakeSyncGraph(result={"resolution": "done"})
+    async def test_writes_finance_decision_and_invokes_async(self):
+        graph = FakeGraph(result={"resolution": "done"})
         config = {"configurable": {"thread_id": "EVT_TEST_5", "checkpoint_ns": ""}}
 
         result = await _resume_billing_dispute(graph, config, "approve", None)
 
         self.assertEqual(result, {"resolution": "done"})
-        self.assertEqual(graph.update_state_calls, [(config, {"finance_decision": "approve"})])
-        self.assertEqual(graph.invoke_calls, [(None, config)])
+        self.assertEqual(graph.aupdate_state_calls, [(config, {"finance_decision": "approve"})])
+        self.assertEqual(graph.ainvoke_calls, [(None, config)])
 
     async def test_modify_payload_overrides_bare_decision(self):
-        graph = FakeSyncGraph()
+        graph = FakeGraph()
         config = {"configurable": {"thread_id": "EVT_TEST_6", "checkpoint_ns": ""}}
 
         await _resume_billing_dispute(
@@ -136,10 +137,9 @@ class TestResumeBillingDisputeAdapter(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(
-            graph.update_state_calls,
+            graph.aupdate_state_calls,
             [(config, {"finance_decision": "Approved a partial refund"})],
         )
-
 
 class TestSubmitAdminDecisionEndToEndForBillingDispute(unittest.IsolatedAsyncioTestCase):
     """The same path platform/admin_api.py's POST /tickets/{id}/decision
@@ -162,11 +162,11 @@ class TestSubmitAdminDecisionEndToEndForBillingDispute(unittest.IsolatedAsyncioT
             state_snapshot="{}", db_path=self.db_path,
         )
 
-        fake_graph = FakeSyncGraph(result={"resolution": "Approved a $200 write-off"})
+        fake_graph = FakeGraph(result={"resolution": "Approved a $200 write-off"})
         calls = {}
 
         def fake_build(checkpointer, db_path=None):
-            calls["db_path"] = db_path
+            calls["built_with_checkpointer"] = checkpointer
             return fake_graph
 
         registry = {
@@ -179,8 +179,7 @@ class TestSubmitAdminDecisionEndToEndForBillingDispute(unittest.IsolatedAsyncioT
         )
 
         self.assertEqual(result, {"resolution": "Approved a $200 write-off"})
-        self.assertEqual(calls["db_path"], self.db_path)
-
+        self.assertIn("built_with_checkpointer", calls)
         ticket = get_ticket(ticket_id, db_path=self.db_path)
         self.assertEqual(ticket["status"], "resolved")
         self.assertEqual(ticket["decision"], "approve")

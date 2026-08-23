@@ -470,53 +470,59 @@ def _classify_client_reply(message: str) -> tuple[str, Optional[str]]:
     return "DISPUTED", message or "The client disputed the invoice."
 
 
-def start_billing_dispute(event_id: str) -> TurnResult:
+async def start_billing_dispute(event_id: str) -> TurnResult:
     from state_graph.billing_dispute import build_billing_dispute_graph, run_turn
+    from state_graph.checkpointer import get_checkpointer
 
-    graph = build_billing_dispute_graph()
-    try:
-        values = run_turn(graph, event_id)
-    except (RuntimeError, ValueError) as e:
-        return TurnResult(text=f"Couldn't open the billing dispute thread: {e}", finished=True)
-    snapshot = graph.get_state({"configurable": {"thread_id": event_id}})
+    async with get_checkpointer() as checkpointer:
+        graph = build_billing_dispute_graph(checkpointer)
+        try:
+            values = await run_turn(graph, event_id)
+        except (RuntimeError, ValueError) as e:
+            return TurnResult(text=f"Couldn't open the billing dispute thread: {e}", finished=True)
+        snapshot = await graph.aget_state({"configurable": {"thread_id": event_id}})
     return _billing_dispute_turn_text(dict(values), snapshot.next, event_id)
 
 
-def continue_billing_dispute(event_id: str, message: str) -> TurnResult:
+async def continue_billing_dispute(event_id: str, message: str) -> TurnResult:
     from state_graph.billing_dispute import (
         build_billing_dispute_graph,
         resume_after_finance_review,
         run_turn,
     )
+    from state_graph.checkpointer import get_checkpointer
 
-    graph = build_billing_dispute_graph()
     config = {"configurable": {"thread_id": event_id}}
-    snapshot = graph.get_state(config)
+    async with get_checkpointer() as checkpointer:
+        graph = build_billing_dispute_graph(checkpointer)
+        snapshot = await graph.aget_state(config)
 
-    if snapshot.next:
-        # Paused at human_finance_review -- only a finance admin can
-        # resolve this (platform/admin_api.py's /tickets endpoints), not
-        # the client's chat message. Just report where things stand.
-        return _billing_dispute_turn_text(dict(snapshot.values), snapshot.next, event_id)
+        if snapshot.next:
+            # Paused at human_finance_review -- only a finance admin can
+            # resolve this (platform/admin_api.py's /tickets endpoints), not
+            # the client's chat message. Just report where things stand.
+            return _billing_dispute_turn_text(dict(snapshot.values), snapshot.next, event_id)
 
-    client_status, feedback = _classify_client_reply(message)
-    updates: dict[str, Any] = {"client_status": client_status}
-    if feedback:
-        updates["client_feedback"] = feedback
+        client_status, feedback = _classify_client_reply(message)
+        updates: dict[str, Any] = {"client_status": client_status}
+        if feedback:
+            updates["client_feedback"] = feedback
 
-    try:
-        values = run_turn(graph, event_id, **updates)
-    except (RuntimeError, ValueError) as e:
-        return TurnResult(text=f"Something went wrong recording your response: {e}")
-    snapshot = graph.get_state(config)
+        try:
+            values = await run_turn(graph, event_id, **updates)
+        except (RuntimeError, ValueError) as e:
+            return TurnResult(text=f"Something went wrong recording your response: {e}")
+        snapshot = await graph.aget_state(config)
     return _billing_dispute_turn_text(dict(values), snapshot.next, event_id)
 
 
-def check_billing_dispute(event_id: str) -> TurnResult:
+async def check_billing_dispute(event_id: str) -> TurnResult:
     from state_graph.billing_dispute import build_billing_dispute_graph
+    from state_graph.checkpointer import get_checkpointer
 
-    graph = build_billing_dispute_graph()
-    snapshot = graph.get_state({"configurable": {"thread_id": event_id}})
+    async with get_checkpointer() as checkpointer:
+        graph = build_billing_dispute_graph(checkpointer)
+        snapshot = await graph.aget_state({"configurable": {"thread_id": event_id}})
     return _billing_dispute_turn_text(dict(snapshot.values), snapshot.next, event_id)
 
 

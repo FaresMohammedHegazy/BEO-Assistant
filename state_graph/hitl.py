@@ -58,29 +58,12 @@ async def _resume_vendor_logistics(graph, config: dict, decision: str, payload: 
 
 
 async def _resume_billing_dispute(graph, config: dict, decision: str, payload: Optional[dict]) -> dict:
-    # billing_dispute's compiled graph is backed by a sync SqliteSaver (see
-    # _build_billing_dispute below), so this calls the sync update_state()
-    # / invoke() pair -- same calls resume_after_finance_review() used to
-    # make directly -- rather than the async ainvoke()/aupdate_state() the
-    # other two adapters use.
-    #
     # human_finance_review reads a free-text `finance_decision`, not a
     # boolean, so a "modify" payload's own summary (if given) wins over the
     # bare decision keyword.
     decision_text = (payload or {}).get("finance_decision") or decision
-    graph.update_state(config, {"finance_decision": decision_text})
-    return graph.invoke(None, config=config)
-
-
-def _build_billing_dispute(checkpointer, db_path: Optional[str]):
-    # billing_dispute manages its own sync SqliteSaver internally rather
-    # than the shared async checkpointer the other two graphs use, so the
-    # checkpointer opened by submit_admin_decision() below is accepted here
-    # only for interface parity and otherwise ignored. db_path is threaded
-    # through instead so tests can point this at an isolated temp database.
-    if db_path:
-        return build_billing_dispute_graph(db_path=db_path)
-    return build_billing_dispute_graph()
+    await graph.aupdate_state(config, {"finance_decision": decision_text})
+    return await graph.ainvoke(None, config=config)
 
 
 # graph_id (as stored on the ticket row) -> how to build + resume that graph.
@@ -94,8 +77,8 @@ GRAPH_REGISTRY: dict[str, dict[str, Callable]] = {
         "resume": _resume_vendor_logistics,
     },
     "billing_dispute": {
-        "build": _build_billing_dispute,
-        "resume": _resume_billing_dispute,
+    "build": lambda checkpointer, db_path=None: build_billing_dispute_graph(checkpointer=checkpointer),
+    "resume": _resume_billing_dispute,
     },
 }
 
