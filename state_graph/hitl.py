@@ -43,27 +43,25 @@ VALID_DECISIONS = ("approve", "reject", "modify")
 
 
 async def _resume_vip_dietary(graph, config: dict, decision: str, payload: Optional[dict]) -> dict:
-    await graph.aupdate_state(config, {"chef_decision": decision})
-    return await graph.ainvoke(None, config=config)
+    # FIX: Capture the new checkpoint config and use it to wake up!
+    updated_config = await graph.aupdate_state(config, {"chef_decision": decision})
+    return await graph.ainvoke(None, config=updated_config)
 
 
 async def _resume_vendor_logistics(graph, config: dict, decision: str, payload: Optional[dict]) -> dict:
-    # hitl_approval only branches on `admin_approved`; treat "modify" as an
-    # approval whose terms the admin has adjusted via `payload` (e.g. a
-    # revised vendor_proposal_amount), and merge that into state alongside it.
     state_update = {"admin_approved": decision in ("approve", "modify")}
     state_update.update(payload or {})
-    await graph.aupdate_state(config, state_update)
-    return await graph.ainvoke(None, config=config)
+    # FIX: Capture the new checkpoint config
+    updated_config = await graph.aupdate_state(config, state_update)
+    return await graph.ainvoke(None, config=updated_config)
 
 
 async def _resume_billing_dispute(graph, config: dict, decision: str, payload: Optional[dict]) -> dict:
-    # human_finance_review reads a free-text `finance_decision`, not a
-    # boolean, so a "modify" payload's own summary (if given) wins over the
-    # bare decision keyword.
     decision_text = (payload or {}).get("finance_decision") or decision
-    await graph.aupdate_state(config, {"finance_decision": decision_text})
-    return await graph.ainvoke(None, config=config)
+    # 1. Update the state with the admin's decision
+    updated_config = await graph.aupdate_state(config, {"finance_decision": decision_text})
+    # 2. Wake the graph up using the NEW updated config!
+    return await graph.ainvoke(None, config=updated_config)
 
 
 # graph_id (as stored on the ticket row) -> how to build + resume that graph.
@@ -128,7 +126,7 @@ async def submit_admin_decision(ticket_id: str, decision: str,
     config = {
         "configurable": {
             "thread_id": ticket["thread_id"],
-            "checkpoint_ns": ticket.get("checkpoint_ns") or "",
+            "checkpoint_ns": "",  # Fix for LangGraph 0.2 namespaces
         }
     }
 

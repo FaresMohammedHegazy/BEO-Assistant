@@ -134,7 +134,16 @@ def build_vendor_logistics_graph():
     workflow.add_node("hitl_approval", hitl_approval)
     workflow.add_node("finalize", finalize)
     
-    workflow.set_entry_point("research_and_plan")
+    def route_entry(state: VendorLogisticsState) -> str:
+        # If the graph is already finished, don't restart it!
+        if state.get("status") in ["completed", "rejected"]:
+            return "end"
+        return "research_and_plan"
+
+    workflow.set_conditional_entry_point(route_entry, {
+        "end": END,
+        "research_and_plan": "research_and_plan"
+    })
     
     # We no longer need conditional failure edges because the exception decorator halts the graph
     workflow.add_edge("research_and_plan", "draft_and_send")

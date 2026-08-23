@@ -64,11 +64,6 @@ def setup_database():
     ''')
 
     # 6. Admin Tickets Table (For HITL and Failure Recovery)
-    #
-    # status lifecycle:
-    #   'open'          -- an unrecoverable node failure (see state_graph/tickets.raise_ticket)
-    #   'pending_admin' -- a graph is paused on a HITL node waiting on an admin decision
-    #   'resolved'      -- an admin has submitted a decision for a 'pending_admin' ticket
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS admin_tickets (
             ticket_id TEXT PRIMARY KEY,
@@ -85,8 +80,7 @@ def setup_database():
         )
     ''')
 
-    # Backfill columns for an aurelia.db created before this change, since
-    # `CREATE TABLE IF NOT EXISTS` above is a no-op against an existing table.
+    # Backfill columns for an aurelia.db created before this change
     existing_cols = {row[1] for row in cursor.execute("PRAGMA table_info(admin_tickets)")}
     for col_name, alter_sql in [
         ("checkpoint_ns", "ALTER TABLE admin_tickets ADD COLUMN checkpoint_ns TEXT NOT NULL DEFAULT ''"),
@@ -97,7 +91,6 @@ def setup_database():
     ]:
         if col_name not in existing_cols:
             cursor.execute(alter_sql)
-
 
     # --- SEED DATA (THE TRAPS) ---
 
@@ -119,10 +112,24 @@ def setup_database():
         VALUES ('GUEST_VIP_1', 'Eleanor Vance', 1, 'SEVERE NUT ALLERGY, VEGAN')
     ''')
 
-    # Trap 3: The Event requiring a $20,000 deposit (For Elicitation)
+    # --- THE NEW DEMO EVENTS ---
+    
+    # EVT_1: Dedicated to the VIP Dietary Demo
     cursor.execute('''
         INSERT OR IGNORE INTO events (event_id, guest_id, room_id, status, headcount, deposit_required) 
-        VALUES ('EVT_999', 'GUEST_VIP_1', 'ROOM_101', 'PENDING_DEPOSIT', 250, 20000.00)
+        VALUES ('EVT_1', 'GUEST_VIP_1', 'ROOM_101', 'PENDING_DEPOSIT', 250, 20000.00)
+    ''')
+
+    # EVT_2: Dedicated to the Billing Dispute Demo
+    cursor.execute('''
+        INSERT OR IGNORE INTO events (event_id, guest_id, room_id, status, headcount, deposit_required) 
+        VALUES ('EVT_2', 'GUEST_VIP_1', 'ROOM_101', 'CONFIRMED', 150, 10000.00)
+    ''')
+
+    # EVT_3: Dedicated to the Vendor Logistics Demo
+    cursor.execute('''
+        INSERT OR IGNORE INTO events (event_id, guest_id, room_id, status, headcount, deposit_required) 
+        VALUES ('EVT_3', 'GUEST_VIP_1', 'ROOM_101', 'PENDING_DEPOSIT', 300, 5000.00)
     ''')
 
     # Seed Ingredients for the LLM to reason over during Sampling
@@ -141,7 +148,6 @@ def setup_database():
 
 
     # --- SEED AGENT TOOLS (DYNAMIC ASSIGNMENTS) ---
-    # Assigns the existing MCP server tools to specific agents.
     agent_tools_seed = [
         ('planning_agent', 'audit_chain_wide_availability', 1),
         ('planning_agent', 'book_event_room', 1),
@@ -162,10 +168,6 @@ def setup_database():
     conn.close()
 
     # LangGraph Checkpoint Tables 
-    # Creates the checkpoints / checkpoint_blobs / checkpoint_writes tables
-    # that every state graph agent will use, inside the SAME aurelia.db
-    # file — not a separate database — using the official
-    # langgraph-checkpoint-sqlite library instead of hand-rolled SQL.
     with SqliteSaver.from_conn_string(db_path) as checkpointer:
         checkpointer.setup()
 

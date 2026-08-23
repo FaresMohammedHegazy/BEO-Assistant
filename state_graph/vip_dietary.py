@@ -222,7 +222,16 @@ def build_vip_dietary_graph(llm_generate=None, check_stock=None,
     builder.add_node("confirmed", confirmed)
     builder.add_node("ticket_exhausted", make_ticket_exhausted(resolved_db_path))
 
-    builder.set_entry_point("fetch_guest_constraints")
+    def route_entry(state: VipDietaryState) -> str:
+        # If the graph is already finished, don't restart it!
+        if state.get("status") in ["CONFIRMED", "FAILED_TICKET"]:
+            return "end"
+        return "fetch_guest_constraints"
+
+    builder.set_conditional_entry_point(route_entry, {
+        "end": END,
+        "fetch_guest_constraints": "fetch_guest_constraints"
+    })
     builder.add_edge("fetch_guest_constraints", "lats_search")
     builder.add_conditional_edges("lats_search", route_after_search, {
         "inventory_check": "inventory_check",
