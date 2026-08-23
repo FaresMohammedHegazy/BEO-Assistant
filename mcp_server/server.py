@@ -511,17 +511,36 @@ async def _run_stdio() -> None:
         await app.run(read_stream, write_stream, init_options)
 
 
+async def _notify_tool_list_changed(request):
+    """Internal endpoint: platform/admin_api.py calls this after toggling
+    agent_tools, so every already-open MCP session (not just the one that
+    made the change) gets a real tools/list_changed push instead of
+    waiting for its next reconnect."""
+    from starlette.responses import JSONResponse
+
+    sessions = list(app.session_manager._server_instances.values())
+    notified = 0
+    for server_instance in sessions:
+        try:
+            await server_instance.request_context.session.send_tool_list_changed()
+            notified += 1
+        except Exception:
+            continue  # a stale/closing session shouldn't block the rest
+    return JSONResponse({"notified_sessions": notified})
+
+
 async def _run_http() -> None:
+    from starlette.routing import Route
+
     host = os.environ.get("MCP_HOST", "127.0.0.1")
     port = int(os.environ.get("MCP_PORT", "8765"))
     print(f"Starting Aurelia BEO Assistant Server on Streamable HTTP ({host}:{port})...",
           file=sys.stderr, flush=True)
 
-    # NOTE: unlike _run_stdio() above, the 'elicitation' experimental
-    # capability isn't wired through this app's initialize/discover path
-    # yet -- verify this before relying on it for the HTTP transport (see
-    # the verification script below).
-    http_app = app.streamable_http_app(host=host)
+    http_app = app.streamable_http_app(
+        host=host,
+        custom_starlette_routes=[Route("/internal/notify-tools-changed", _notify_tool_list_changed, methods=["POST"])],
+    )
     config = uvicorn.Config(http_app, host=host, port=port, log_level="info")
     server = uvicorn.Server(config)
     await server.serve()

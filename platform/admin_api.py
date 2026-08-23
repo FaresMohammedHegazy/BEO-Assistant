@@ -8,6 +8,7 @@ if REPO_ROOT not in sys.path:
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 import sqlite3
+import requests
 
 from rag.vector_store import VectorStore
 from state_graph.tickets import get_ticket, list_tickets
@@ -17,6 +18,10 @@ from state_graph.recovery import resume_from_ticket
 router = APIRouter()
 DB_PATH = os.path.join(REPO_ROOT, 'db', 'aurelia.db')
 RAG_STORE_PATH = os.path.join(REPO_ROOT, 'db', 'rag_store.db') 
+
+MCP_HOST = os.environ.get("MCP_HOST", "127.0.0.1")
+MCP_PORT = os.environ.get("MCP_PORT", "8765")
+MCP_NOTIFY_URL = f"http://{MCP_HOST}:{MCP_PORT}/internal/notify-tools-changed"
 
 class ToolToggle(BaseModel):
     agent_name: str
@@ -51,6 +56,18 @@ def toggle_tool(toggle: ToolToggle):
     )
     conn.commit()
     conn.close()
+
+    # Best-effort: push tools/list_changed to every already-open MCP
+    # session so a long-lived session (e.g. memory_rag) picks up this
+    # change without needing to reconnect. The DB write above is the
+    # source of truth and has already succeeded, so a notify failure
+    # (server not running, network hiccup) must not fail the toggle
+    # itself -- the next new session will read the updated row regardless.
+    try:
+        requests.post(MCP_NOTIFY_URL, timeout=2)
+    except requests.RequestException:
+        pass
+
     return {"status": "success"}
 
 @router.post("/rag/upload")
