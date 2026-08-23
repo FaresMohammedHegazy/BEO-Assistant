@@ -13,20 +13,27 @@ LangGraph mechanism, so each graph_id gets its own small resume() adapter:
 
   * vip_dietary_agent -- chef_signoff uses the dynamic `interrupt()`
     primitive, so it resumes via `ainvoke(Command(resume=...), config)`.
-  * vendor_logistics -- hitl_approval is a static `interrupt_before` node,
+    * vendor_logistics -- hitl_approval is a static `interrupt_before` node,
     so it resumes by writing the decision into state with
     `aupdate_state(...)` and then continuing with `ainvoke(None, config)`.
 
-A third graph (post-event billing, tracked separately) is not yet built --
-see Issue #68. Wiring it in only requires adding one more entry to
-GRAPH_REGISTRY below with the resume adapter that matches whichever
-interrupt mechanism it ends up using; nothing else in this module changes.
+  * billing_dispute -- human_finance_review is also a static
+    `interrupt_before` node, so it resumes the same way vendor_logistics
+    does, except the decision is written into state as free-text under
+    `finance_decision` rather than a boolean `admin_approved`.
+
+    billing_dispute still compiles against its own sync `SqliteSaver`
+    instead of the shared async checkpointer this module opens via
+    get_checkpointer() (see the checkpointer-unification follow-up); its
+    build() adapter below accepts and ignores that checkpointer for now,
+    which is why build() adapters here are passed `db_path` explicitly too.
 """
 import json
 from typing import Any, Awaitable, Callable, Optional
 
 from langgraph.types import Command
 
+from state_graph.billing_dispute import build_billing_dispute_graph
 from state_graph.checkpointer import get_checkpointer
 from state_graph.tickets import get_ticket, resolve_ticket
 from state_graph.vendor_logistics import compile_vendor_logistics_graph
@@ -50,15 +57,45 @@ async def _resume_vendor_logistics(graph, config: dict, decision: str, payload: 
     return await graph.ainvoke(None, config=config)
 
 
+async def _resume_billing_dispute(graph, config: dict, decision: str, payload: Optional[dict]) -> dict:
+    # billing_dispute's compiled graph is backed by a sync SqliteSaver (see
+    # _build_billing_dispute below), so this calls the sync update_state()
+    # / invoke() pair -- same calls resume_after_finance_review() used to
+    # make directly -- rather than the async ainvoke()/aupdate_state() the
+    # other two adapters use.
+    #
+    # human_finance_review reads a free-text `finance_decision`, not a
+    # boolean, so a "modify" payload's own summary (if given) wins over the
+    # bare decision keyword.
+    decision_text = (payload or {}).get("finance_decision") or decision
+    graph.update_state(config, {"finance_decision": decision_text})
+    return graph.invoke(None, config=config)
+
+
+def _build_billing_dispute(checkpointer, db_path: Optional[str]):
+    # billing_dispute manages its own sync SqliteSaver internally rather
+    # than the shared async checkpointer the other two graphs use, so the
+    # checkpointer opened by submit_admin_decision() below is accepted here
+    # only for interface parity and otherwise ignored. db_path is threaded
+    # through instead so tests can point this at an isolated temp database.
+    if db_path:
+        return build_billing_dispute_graph(db_path=db_path)
+    return build_billing_dispute_graph()
+
+
 # graph_id (as stored on the ticket row) -> how to build + resume that graph.
 GRAPH_REGISTRY: dict[str, dict[str, Callable]] = {
     "vip_dietary_agent": {
-        "build": lambda checkpointer: build_vip_dietary_graph(checkpointer=checkpointer),
+        "build": lambda checkpointer, db_path=None: build_vip_dietary_graph(checkpointer=checkpointer),
         "resume": _resume_vip_dietary,
     },
     "vendor_logistics": {
-        "build": lambda checkpointer: compile_vendor_logistics_graph(checkpointer=checkpointer),
+        "build": lambda checkpointer, db_path=None: compile_vendor_logistics_graph(checkpointer=checkpointer),
         "resume": _resume_vendor_logistics,
+    },
+    "billing_dispute": {
+        "build": _build_billing_dispute,
+        "resume": _resume_billing_dispute,
     },
 }
 
@@ -113,7 +150,7 @@ async def submit_admin_decision(ticket_id: str, decision: str,
     }
 
     async with get_checkpointer(db_path) as checkpointer:
-        graph = graph_entry["build"](checkpointer)
+        graph = graph_entry["build"](checkpointer, db_path)
         result_state = await graph_entry["resume"](graph, config, decision, payload)
 
     resolve_ticket(

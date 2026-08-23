@@ -92,6 +92,7 @@ if REPO_ROOT not in sys.path:
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, StateGraph
 from state_graph.recovery import with_error_handling
+from state_graph.tickets import open_hitl_ticket
 
 # Define the database path dynamically, matching mcp_server/server.py's convention.
 DB_PATH = os.path.join(REPO_ROOT, 'db', 'aurelia.db')
@@ -366,7 +367,6 @@ def draft_dispute_email(state: BillingDisputeState) -> dict:
 # human_finance_review run and the graph continue.
 
 def escalate_to_finance(state: BillingDisputeState) -> dict:
-    ticket_id = f"TCK-{state['event_id']}-{uuid.uuid4().hex[:8]}"
     snapshot = {
         "invoice": state.get("invoice"),
         "reconciliation": state.get("reconciliation"),
@@ -375,23 +375,19 @@ def escalate_to_finance(state: BillingDisputeState) -> dict:
         "client_feedback": state.get("client_feedback"),
     }
 
-    conn = _connect()
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO admin_tickets (ticket_id, graph_id, thread_id, status, state_snapshot, error_message) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (
-            ticket_id,
-            GRAPH_ID,
-            state["event_id"],
-            "PENDING_FINANCE_REVIEW",
-            json.dumps(snapshot),
+    # Opened through the same helper the other two graphs use, so the ticket
+    # lands in the canonical 'pending_admin' status and is idempotent under
+    # interrupt_before's replay.
+    ticket_id = open_hitl_ticket(
+        graph_id=GRAPH_ID,
+        thread_id=state["event_id"],
+        reason=(
             f"Client rejected the final invoice for {state['event_id']}: "
-            f"{state.get('client_feedback') or 'no reason given'}",
+            f"{state.get('client_feedback') or 'no reason given'}"
         ),
+        state_snapshot=json.dumps(snapshot, default=str),
+        db_path=DB_PATH,
     )
-    conn.commit()
-    conn.close()
 
     return {"escalation_ticket_id": ticket_id}
 
@@ -399,23 +395,18 @@ def escalate_to_finance(state: BillingDisputeState) -> dict:
 def human_finance_review(state: BillingDisputeState) -> dict:
     decision = state.get("finance_decision")
     if not decision:
-        # Should not normally happen: resume_after_finance_review() sets this
-        # before resuming the graph past the interrupt_before breakpoint.
+        # Should not normally happen: submit_admin_decision() (via
+        # state_graph/hitl.py) sets this before resuming the graph past the
+        # interrupt_before breakpoint.
         raise RuntimeError(
             "human_finance_review reached without a finance_decision set. "
-            "Call resume_after_finance_review(graph, event_id, decision) instead "
-            "of resuming this graph directly."
+            "Resolve this ticket via state_graph.hitl.submit_admin_decision(...) "
+            "instead of resuming this graph directly."
         )
 
-    conn = _connect()
-    cursor = conn.cursor()
-    cursor.execute(
-        "UPDATE admin_tickets SET status = 'RESOLVED' WHERE ticket_id = ?",
-        (state.get("escalation_ticket_id"),),
-    )
-    conn.commit()
-    conn.close()
-
+    # Ticket resolution (status -> 'resolved', decision, resolved_at) is now
+    # handled centrally by submit_admin_decision() after this node returns,
+    # the same way it is for vip_dietary_agent and vendor_logistics.
     return {"resolution": f"Finance admin decision on {state['event_id']}: {decision}"}
 
 
