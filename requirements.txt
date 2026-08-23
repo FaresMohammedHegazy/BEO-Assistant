@@ -1,5 +1,5 @@
 # Runtime dependencies for the BEO Assistant codebase
-mcp
+mcp<2.0.0
 requests
 jsonschema
 python-dotenv
