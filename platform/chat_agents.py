@@ -199,17 +199,12 @@ class MemoryRagEngine:
         if self._session is not None:
             return
         from mcp.client.session import ClientSession
-        from mcp.client.stdio import StdioServerParameters, stdio_client
+        from mcp.client.streamable_http import streamable_http_client
 
-        server_params = StdioServerParameters(
-            command=sys.executable,
-            args=["-m", "mcp_server.server"],
-            env=os.environ.copy(),
-            cwd=REPO_ROOT,
-        )
+        mcp_url = os.environ.get("MCP_SERVER_URL", "http://127.0.0.1:8765/mcp")
         self._exit_stack = AsyncExitStack()
         read_stream, write_stream = await self._exit_stack.enter_async_context(
-            stdio_client(server_params)
+            streamable_http_client(mcp_url)
         )
         self._session = await self._exit_stack.enter_async_context(
             ClientSession(read_stream, write_stream, sampling_callback=self._handle_sampling)

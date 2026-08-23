@@ -7,6 +7,7 @@ import mcp.types as types
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 import asyncio
+import uvicorn
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
@@ -499,7 +500,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         raise ValueError(f"Unknown tool: {name}")
 
 
-async def main():
+async def _run_stdio() -> None:
     print("Starting Aurelia BEO Assistant Server on stdio...", file=sys.stderr, flush=True)
     init_options = app.create_initialization_options()
     if init_options.capabilities.experimental is None:
@@ -508,6 +509,30 @@ async def main():
 
     async with stdio_server() as (read_stream, write_stream):
         await app.run(read_stream, write_stream, init_options)
+
+
+async def _run_http() -> None:
+    host = os.environ.get("MCP_HOST", "127.0.0.1")
+    port = int(os.environ.get("MCP_PORT", "8765"))
+    print(f"Starting Aurelia BEO Assistant Server on Streamable HTTP ({host}:{port})...",
+          file=sys.stderr, flush=True)
+
+    # NOTE: unlike _run_stdio() above, the 'elicitation' experimental
+    # capability isn't wired through this app's initialize/discover path
+    # yet -- verify this before relying on it for the HTTP transport (see
+    # the verification script below).
+    http_app = app.streamable_http_app(host=host)
+    config = uvicorn.Config(http_app, host=host, port=port, log_level="info")
+    server = uvicorn.Server(config)
+    await server.serve()
+
+
+async def main():
+    transport = os.environ.get("MCP_TRANSPORT", "stdio").lower()
+    if transport == "http":
+        await _run_http()
+    else:
+        await _run_stdio()
 
 
 if __name__ == "__main__":

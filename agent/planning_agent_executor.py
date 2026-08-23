@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 from mcp.client.session import ClientSession
-from mcp.client.stdio import StdioServerParameters, stdio_client
+from mcp.client.streamable_http import streamable_http_client
 
 from planning.planning_lab.algorithms.decomposition import (
     decompose_goal_grounded,
@@ -48,14 +48,10 @@ class PlanningAgentExecutor:
         self._exit_stack: AsyncExitStack | None = None
 
     async def connect(self) -> None:
-        server_params = StdioServerParameters(
-            command=sys.executable,
-            args=["-m", "mcp_server.server"],
-            env=os.environ.copy(),
-        )
+        mcp_url = os.environ.get("MCP_SERVER_URL", "http://127.0.0.1:8765/mcp")
         self._exit_stack = AsyncExitStack()
         read_stream, write_stream = await self._exit_stack.enter_async_context(
-            stdio_client(server_params)
+            streamable_http_client(mcp_url)
         )
         self._session = await self._exit_stack.enter_async_context(
             ClientSession(read_stream, write_stream)
