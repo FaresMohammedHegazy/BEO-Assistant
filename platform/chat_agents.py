@@ -111,25 +111,8 @@ AGENT_CATALOG: list[dict[str, Any]] = [
         ),
         "kind": "structured",
         "fields": [
-            {"name": "event_id", "label": "Event ID", "example": "EVT_999"},
+            {"name": "event_id", "label": "Event ID", "example": "EVT_1"},
             {"name": "guest_id", "label": "Guest ID", "example": "GUEST_VIP_1"},
-        ],
-    },
-    {
-        "key": "vendor_logistics",
-        "label": "Vendor Logistics",
-        "description": (
-            "Plans event vendor logistics and sends the request; pauses to "
-            "wait for the vendor's reply, then for admin approval if the "
-            "quote is over budget."
-        ),
-        "kind": "structured",
-        "fields": [
-            {"name": "event_id", "label": "Event ID", "example": "EVT_999"},
-            {"name": "vendor_name", "label": "Vendor name", "example": "Acme Linens"},
-            {"name": "logistics_goal", "label": "What do you need from them?",
-             "example": "Confirm linens delivery for 250 guests by 9am."},
-            {"name": "budget", "label": "Budget (USD)", "example": "1000"},
         ],
     },
     {
@@ -142,7 +125,24 @@ AGENT_CATALOG: list[dict[str, Any]] = [
         ),
         "kind": "structured",
         "fields": [
-            {"name": "event_id", "label": "Event ID", "example": "EVT_999"},
+            {"name": "event_id", "label": "Event ID", "example": "EVT_2"},
+        ],
+    },
+    {
+        "key": "vendor_logistics",
+        "label": "Vendor Logistics",
+        "description": (
+            "Plans event vendor logistics and sends the request; pauses to "
+            "wait for the vendor's reply, then for admin approval if the "
+            "quote is over budget."
+        ),
+        "kind": "structured",
+        "fields": [
+            {"name": "event_id", "label": "Event ID", "example": "EVT_3"},
+            {"name": "vendor_name", "label": "Vendor name", "example": "Acme Linens"},
+            {"name": "logistics_goal", "label": "What do you need from them?",
+             "example": "Confirm linens delivery for 250 guests by 9am."},
+            {"name": "budget", "label": "Budget (USD)", "example": "1000"},
         ],
     },
 ]
@@ -475,7 +475,7 @@ async def start_billing_dispute(event_id: str) -> TurnResult:
             values = await run_turn(graph, event_id)
         except (RuntimeError, ValueError) as e:
             return TurnResult(text=f"Couldn't open the billing dispute thread: {e}", finished=True)
-        snapshot = await graph.aget_state({"configurable": {"thread_id": event_id}})
+        snapshot = await graph.aget_state({"configurable": {"thread_id": event_id, "checkpoint_ns": ""}})
     return _billing_dispute_turn_text(dict(values), snapshot.next, event_id)
 
 
@@ -487,7 +487,7 @@ async def continue_billing_dispute(event_id: str, message: str) -> TurnResult:
     )
     from state_graph.checkpointer import get_checkpointer
 
-    config = {"configurable": {"thread_id": event_id}}
+    config = {"configurable": {"thread_id": event_id, "checkpoint_ns": ""}}
     async with get_checkpointer() as checkpointer:
         graph = build_billing_dispute_graph(checkpointer)
         snapshot = await graph.aget_state(config)
@@ -517,7 +517,7 @@ async def check_billing_dispute(event_id: str) -> TurnResult:
 
     async with get_checkpointer() as checkpointer:
         graph = build_billing_dispute_graph(checkpointer)
-        snapshot = await graph.aget_state({"configurable": {"thread_id": event_id}})
+        snapshot = await graph.aget_state({"configurable": {"thread_id": event_id, "checkpoint_ns": ""}})
     return _billing_dispute_turn_text(dict(snapshot.values), snapshot.next, event_id)
 
 

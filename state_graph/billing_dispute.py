@@ -441,6 +441,8 @@ def finalize_billing(state: BillingDisputeState) -> dict:
 # already supplies client_status can run straight through in one call).
 
 def _route_next_step(state: BillingDisputeState) -> str:
+    if state.get("resolution"):
+        return "end_turn"
     if not state.get("invoice"):
         return "generate_invoice"
     if not state.get("reconciliation", {}).get("completed"):
