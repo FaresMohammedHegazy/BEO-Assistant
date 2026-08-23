@@ -141,7 +141,7 @@ class SessionStore:
         elif agent_key == "billing_dispute":
             event_id = _require(fields, "event_id")
             thread_id = event_id  # state_graph/billing_dispute.py: thread_id = event_id
-            result = await asyncio.to_thread(agents.start_billing_dispute, event_id)
+            result = await agents.start_billing_dispute(event_id)
             session = ChatSession(
                 session_id, agent_key, thread_id=thread_id, fields={"event_id": event_id},
             )
@@ -180,7 +180,7 @@ class SessionStore:
         if session.agent_key == "vendor_logistics":
             return await agents.check_vendor_logistics(session.thread_id)
         if session.agent_key == "billing_dispute":
-            return await asyncio.to_thread(agents.check_billing_dispute, session.thread_id)
+            return await agents.check_billing_dispute(session.thread_id)
         raise ValueError(f"{session.agent_key} has no out-of-band status to check")
 
     async def _check_and_report(self, session: ChatSession, *, user_prompted: bool) -> None:
@@ -253,9 +253,7 @@ class SessionStore:
                         + (f": {last_assistant.content}" if last_assistant else "."),
                     ))
                     return
-                result = await asyncio.to_thread(
-                    agents.continue_billing_dispute, session.thread_id, text
-                )
+                result = await agents.continue_billing_dispute(session.thread_id, text)
                 _apply_turn_result(session, result)
                 return
 

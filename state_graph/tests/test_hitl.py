@@ -144,8 +144,9 @@ class TestSubmitAdminDecision(unittest.IsolatedAsyncioTestCase):
         fake_graph = FakeGraph(result={"status": "completed"})
         calls = {}
 
-        def fake_build(checkpointer):
+        def fake_build(checkpointer, db_path=None):
             calls["built_with_checkpointer"] = checkpointer
+            calls["built_with_db_path"] = db_path
             return fake_graph
 
         async def fake_resume(graph, config, decision, payload):

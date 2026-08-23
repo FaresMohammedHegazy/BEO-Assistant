@@ -1,5 +1,6 @@
 # Runtime dependencies for the BEO Assistant codebase
 mcp
+requests
 jsonschema
 python-dotenv
 groq

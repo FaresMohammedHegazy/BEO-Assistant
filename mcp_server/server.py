@@ -7,6 +7,7 @@ import mcp.types as types
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 import asyncio
+import uvicorn
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
@@ -499,7 +500,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         raise ValueError(f"Unknown tool: {name}")
 
 
-async def main():
+async def _run_stdio() -> None:
     print("Starting Aurelia BEO Assistant Server on stdio...", file=sys.stderr, flush=True)
     init_options = app.create_initialization_options()
     if init_options.capabilities.experimental is None:
@@ -508,6 +509,104 @@ async def main():
 
     async with stdio_server() as (read_stream, write_stream):
         await app.run(read_stream, write_stream, init_options)
+
+
+# NOTE ON SWITCHING TRANSPORT (streamable-http -> SSE):
+# `app.streamable_http_app()` came with a built-in `StreamableHTTPSessionManager`
+# that tracked every live session in `app.session_manager._server_instances`.
+# The low-level `mcp.server.Server` has NO equivalent helper for SSE
+# (`.sse_app()` only exists on FastMCP, not on the raw `Server` class),
+# so we build the Starlette app by hand with `SseServerTransport`, and we
+# lose that free session bookkeeping. We replace it with our own tiny
+# registry (`_active_sessions`) keyed by connection, storing each
+# connection's raw `write_stream` so `_notify_tool_list_changed` can push
+# a notification directly onto it instead of going through
+# `session_manager._server_instances` (which no longer exists under SSE).
+_active_sessions: dict[str, object] = {}
+
+
+async def _notify_tool_list_changed(request):
+    """Internal endpoint: platform/admin_api.py calls this after toggling
+    agent_tools, so every already-open MCP session (not just the one that
+    made the change) gets a real tools/list_changed push instead of
+    waiting for its next reconnect.
+
+    Sends the notification as a raw JSON-RPC message directly on each
+    session's write_stream. This is the SSE-transport replacement for the
+    old `session_instance.request_context.session.send_tool_list_changed()`
+    call, which only worked because streamable-http's session manager
+    exposed a live `ServerSession` object per connection.
+    """
+    from starlette.responses import JSONResponse
+    from mcp.shared.message import SessionMessage
+    import mcp.types as types
+
+    notification = types.JSONRPCNotification(
+        jsonrpc="2.0",
+        method="notifications/tools/list_changed",
+    )
+    notified = 0
+    for write_stream in list(_active_sessions.values()):
+        try:
+            await write_stream.send(SessionMessage(notification))
+            notified += 1
+        except Exception:
+            continue  # a stale/closing session shouldn't block the rest
+    return JSONResponse({"notified_sessions": notified})
+
+
+async def _run_http() -> None:
+    import uuid
+    from starlette.applications import Starlette
+    from starlette.responses import Response
+    from starlette.routing import Route, Mount
+    from mcp.server.sse import SseServerTransport
+
+    host = os.environ.get("MCP_HOST", "127.0.0.1")
+    port = int(os.environ.get("MCP_PORT", "8765"))
+    print(f"Starting Aurelia BEO Assistant Server on SSE ({host}:{port})...",
+          file=sys.stderr, flush=True)
+
+    # SSE needs two endpoints instead of streamable-http's single "/mcp":
+    #   GET  /sse       -> opens the long-lived event stream (server -> client)
+    #   POST /messages/ -> client -> server messages, tagged with a
+    #                      ?session_id=... query param the client picks up
+    #                      from the very first event sent on /sse.
+    sse = SseServerTransport("/messages/")
+
+    async def handle_sse(request):
+        init_options = app.create_initialization_options()
+        if init_options.capabilities.experimental is None:
+            init_options.capabilities.experimental = {}
+        init_options.capabilities.experimental["elicitation"] = {}
+
+        async with sse.connect_sse(request.scope, request.receive, request._send) as (read_stream, write_stream):
+            session_key = str(uuid.uuid4())
+            _active_sessions[session_key] = write_stream
+            try:
+                await app.run(read_stream, write_stream, init_options)
+            finally:
+                _active_sessions.pop(session_key, None)
+        return Response()
+
+    starlette_app = Starlette(
+        routes=[
+            Route("/sse", endpoint=handle_sse),
+            Mount("/messages/", app=sse.handle_post_message),
+            Route("/internal/notify-tools-changed", _notify_tool_list_changed, methods=["POST"]),
+        ]
+    )
+    config = uvicorn.Config(starlette_app, host=host, port=port, log_level="info")
+    server = uvicorn.Server(config)
+    await server.serve()
+
+
+async def main():
+    transport = os.environ.get("MCP_TRANSPORT", "stdio").lower()
+    if transport == "http":
+        await _run_http()
+    else:
+        await _run_stdio()
 
 
 if __name__ == "__main__":

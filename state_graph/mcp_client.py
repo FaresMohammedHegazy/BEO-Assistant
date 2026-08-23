@@ -1,23 +1,21 @@
 import os
-import sys
 from contextlib import asynccontextmanager
 
 from mcp.client.session import ClientSession
-from mcp.client.stdio import stdio_client, StdioServerParameters
+from mcp.client.sse import sse_client
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 @asynccontextmanager
 async def open_mcp_session():
-    """Yield a live ClientSession connected to the real mcp_server."""
-    server_params = StdioServerParameters(
-        command=sys.executable,
-        args=["-m", "mcp_server.server"],
-        env=os.environ.copy(),
-        cwd=REPO_ROOT,
-    )
-    async with stdio_client(server_params) as (read_stream, write_stream):
+    """Yield a live ClientSession connected to the real mcp_server, over
+        the shared SSE server (see mcp_server/server.py's
+    MCP_TRANSPORT=http mode, which now serves SSE on /sse) rather than
+    spawning a private stdio
+    subprocess per call."""
+    mcp_url = os.environ.get("MCP_SERVER_URL", "http://127.0.0.1:8765/sse")
+    async with sse_client(mcp_url) as (read_stream, write_stream):
         async with ClientSession(read_stream, write_stream) as session:
             await session.initialize()
             yield session
