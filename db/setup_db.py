@@ -156,7 +156,8 @@ def setup_database():
         VALUES (?, ?, ?)
     ''', agent_tools_seed)
 
-
+    cursor.execute("UPDATE safe_ingredients SET stock_quantity = 50")
+    
     conn.commit()
     conn.close()
 
