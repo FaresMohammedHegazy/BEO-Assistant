@@ -17,7 +17,7 @@ from state_graph.recovery import resume_from_ticket
 
 router = APIRouter()
 DB_PATH = os.path.join(REPO_ROOT, 'db', 'aurelia.db')
-RAG_STORE_PATH = os.path.join(REPO_ROOT, 'db', 'rag_store.db') 
+RAG_STORE_PATH = os.path.join(REPO_ROOT, 'db', 'rag_store.sqlite')
 
 MCP_HOST = os.environ.get("MCP_HOST", "127.0.0.1")
 MCP_PORT = os.environ.get("MCP_PORT", "8765")

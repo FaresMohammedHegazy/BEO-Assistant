@@ -12,10 +12,15 @@ from rag.retrievers import NaiveRAG
 from planning.planning_lab.algorithms.decomposition import decompose_goal, execute_plan
 from state_graph.mcp_client import open_mcp_session
 from state_graph.checkpointer import DEFAULT_DB_PATH
-from state_graph.tickets import open_hitl_ticket
+from state_graph.tickets import open_hitl_ticket, raise_ticket
 from state_graph.recovery import with_error_handling
 
 logger = logging.getLogger(__name__)
+
+# Bounds the renegotiation cycle below (hitl_approval -> draft_and_send ->
+# wait_for_vendor_reply -> hitl_approval ...). Without a cap, an admin who
+# keeps rejecting quotes would let the graph loop forever.
+MAX_RENEGOTIATION_ROUNDS = 2
 
 class VendorLogisticsState(TypedDict):
     """The unified state dictionary for the vendor logistics graph."""
@@ -35,7 +40,11 @@ class VendorLogisticsState(TypedDict):
     
     # Human-In-The-Loop properties
     admin_approved: Optional[bool]
-    
+
+    # Cycle-tracking: how many times the admin has sent this back to the
+    # vendor for a revised quote (see hitl_approval / route_after_hitl).
+    retry_count: int
+
     # Failure and Recovery properties
     status: str
     error_message: Optional[str]
@@ -103,10 +112,44 @@ def wait_for_vendor_reply(state: VendorLogisticsState, config: Dict[str, Any]) -
 
 @with_error_handling("vendor_logistics", "hitl_approval")
 def hitl_approval(state: VendorLogisticsState, config: Dict[str, Any]) -> Dict[str, Any]:
-    """Node 4: The Graph pauses BEFORE this node. It processes the Admin's explicit decision."""
+    """Node 4: The Graph pauses BEFORE this node. It processes the Admin's explicit decision.
+
+    An approval finalizes the deal. A rejection is not automatically a dead
+    end: an admin rejecting an over-budget quote usually means "go back and
+    ask the vendor for a better number," not "abandon the booking." So a
+    rejection loops back to draft_and_send for another round, up to
+    MAX_RENEGOTIATION_ROUNDS, before this becomes a real, ticketed failure.
+    """
     if state.get("admin_approved") is True:
         return {"status": "ready_to_finalize"}
-    return {"status": "rejected"}
+
+    retry_count = state.get("retry_count", 0)
+    if retry_count < MAX_RENEGOTIATION_ROUNDS:
+        # Clear the old vendor reply so wait_for_vendor_reply's
+        # "resumed but vendor_reply is missing" guard applies again on the
+        # next round, and clear admin_approved so this node doesn't
+        # immediately re-finalize on stale state if it's ever replayed.
+        return {
+            "status": "renegotiating",
+            "retry_count": retry_count + 1,
+            "vendor_reply": None,
+            "vendor_proposal_amount": None,
+            "admin_approved": None,
+        }
+
+    # Retries exhausted: this is the real, un-retryable failure mode --
+    # ticket it instead of silently giving up.
+    ticket_id = raise_ticket(
+        graph_id="vendor_logistics",
+        thread_id=state.get("thread_id", "unknown"),
+        error_message=(
+            f"Vendor {state.get('vendor_name', 'vendor')} could not meet budget "
+            f"${state.get('budget', 0):,.2f} after {MAX_RENEGOTIATION_ROUNDS} "
+            f"renegotiation round(s); admin rejected the final quote."
+        ),
+        state_snapshot=json.dumps(state, default=str),
+    )
+    return {"status": "rejected", "ticket_id": ticket_id}
 
 @with_error_handling("vendor_logistics", "finalize")
 def finalize(state: VendorLogisticsState, config: Dict[str, Any]) -> Dict[str, Any]:
@@ -120,6 +163,7 @@ def route_after_wait(state: VendorLogisticsState) -> str:
     return "finalize"
 
 def route_after_hitl(state: VendorLogisticsState) -> str:
+    if state["status"] == "renegotiating": return "draft_and_send"
     if state["status"] == "rejected": return "end"
     return "finalize"
 
@@ -149,7 +193,11 @@ def build_vendor_logistics_graph():
     workflow.add_edge("research_and_plan", "draft_and_send")
     workflow.add_edge("draft_and_send", "wait_for_vendor_reply")
     workflow.add_conditional_edges("wait_for_vendor_reply", route_after_wait, {"hitl": "hitl_approval", "finalize": "finalize"})
-    workflow.add_conditional_edges("hitl_approval", route_after_hitl, {"finalize": "finalize", "end": END})
+    workflow.add_conditional_edges("hitl_approval", route_after_hitl, {
+        "finalize": "finalize",
+        "end": END,
+        "draft_and_send": "draft_and_send",
+    })
     workflow.add_edge("finalize", END)
     
     return workflow
