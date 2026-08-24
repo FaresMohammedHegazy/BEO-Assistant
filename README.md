@@ -203,7 +203,7 @@ Alongside the RAG/memory agent, the repository has a second, independent agent t
 
 ### 9.2 Planning strategies
 
-`PlanningAgentExecutor` runs a goal through one of two grounded modes, both backed by `ChatGroq` (`MODEL_NAME`, default `llama-3.3-70b-versatile`):
+`PlanningAgentExecutor` runs a goal through one of two grounded modes, both backed by `ChatGroq` (`MODEL_NAME`, default `openai/gpt-oss-120b`):
 
 - **`decomposition` (default):** builds a full task DAG up front (`decompose_goal_grounded`), validates it (acyclicity, id/dependency checks via NetworkX + Pydantic), then executes it step by step against the live MCP tools (`execute_plan_against_mcp`).
 - **`dynamic`:** interleaves planning and observation one step at a time (`dynamic_decomposition_grounded`), capped by `--max-steps`.
@@ -381,7 +381,7 @@ Create a root-level `.env` file with at least the following values:
 
 ```bash
 GROQ_API_KEY=your_groq_api_key
-MODEL_NAME=llama-3.3-70b-versatile
+MODEL_NAME=openai/gpt-oss-120b
 EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
 ```
 
