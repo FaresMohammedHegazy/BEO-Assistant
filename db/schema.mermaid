@@ -1,21 +1,22 @@
 erDiagram
     GUESTS ||--o{ EVENTS : "hosts"
     ROOMS ||--o{ EVENTS : "is booked for"
-    
+    EVENTS ||--o{ ADMIN_TICKETS : "can raise (thread_id = event_id)"
+
     GUESTS {
         string guest_id PK
         string name
         boolean vip_status
         string dietary_restrictions
     }
-    
+
     ROOMS {
         string room_id PK
         string name
         int max_capacity
         string fire_code_status
     }
-    
+
     EVENTS {
         string event_id PK
         string guest_id FK
@@ -24,10 +25,31 @@ erDiagram
         int headcount
         float deposit_required
     }
-    
+
     SAFE_INGREDIENTS {
         string ingredient_id PK
         string name
         boolean is_nut_free
         boolean is_vegan
+        int stock_quantity
+    }
+
+    AGENT_TOOLS {
+        string agent_name PK
+        string tool_name PK
+        boolean is_active
+    }
+
+    ADMIN_TICKETS {
+        string ticket_id PK
+        string graph_id
+        string thread_id
+        string status
+        string state_snapshot
+        string error_message
+        string checkpoint_ns
+        string decision
+        string decision_payload
+        string created_at
+        string resolved_at
     }
